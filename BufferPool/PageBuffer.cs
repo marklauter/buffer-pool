@@ -7,10 +7,12 @@ internal sealed class PageBuffer
     , IDisposable
 {
     private readonly ReaderWriterLockSlim gate = new();
-    private readonly LinkedList<(int pageId, Page page)> lru; // page id, page
+    private readonly LruCache lru = new();
+    private readonly Dictionary<int, Page> pages;
     private readonly FileStream file;
     private readonly int pageSize;
     private readonly int maxPages;
+    private bool disposed;
 
     private PageBuffer(
         FileStream file,
@@ -20,8 +22,7 @@ internal sealed class PageBuffer
         this.file = file;
         this.pageSize = pageSize;
         maxPages = bufferSizeInKb * 1024 / pageSize;
-        lru = new();
-        Pages = new(maxPages);
+        pages = new(maxPages);
     }
 
     [SuppressMessage("IDisposableAnalyzers.Correctness", "IDISP004:Don't ignore created IDisposable", Justification = "PageBuffer will dispose of the file.")]
@@ -37,7 +38,7 @@ internal sealed class PageBuffer
         gate.EnterReadLock();
         try
         {
-            if (TryGetPage(pageId, out var page))
+            if (TryAccess(pageId, out var page))
             {
                 return page;
             }
@@ -50,18 +51,18 @@ internal sealed class PageBuffer
         gate.EnterWriteLock();
         try
         {
-            // ensure that the page wasn't added while waiting for the write lock
-            if (TryGetPage(pageId, out var page))
+            // double-checked cache pattern
+            if (TryAccess(pageId, out var page))
             {
                 return page;
             }
 
-            if (IsOverflow())
+            if (IfOverflow())
             {
-                EvictPage();
+                Evict();
             }
 
-            return AddToTop(pageId, LoadPage(pageId));
+            return Access(pageId, Load(pageId));
         }
         finally
         {
@@ -69,18 +70,28 @@ internal sealed class PageBuffer
         }
     }
 
-    private bool TryGetPage(int pageId, [NotNullWhen(true)] out Page? page)
+    private bool TryAccess(int pageId, [NotNullWhen(true)] out Page? page)
     {
-        if (Pages.TryGetValue(pageId, out page))
+        if (pages.TryGetValue(pageId, out page))
         {
-            MoveToTop(pageId, page);
+            lru.Access(pageId, page);
             return true;
         }
 
         return false;
     }
 
-    private Page LoadPage(int pageId)
+    private bool IfOverflow() => pages.Count >= maxPages;
+
+    private void Evict()
+    {
+        if (lru.TryEvict(out var evictedPage))
+        {
+            _ = pages.Remove(evictedPage.Value.pageId);
+        }
+    }
+
+    private Page Load(int pageId)
     {
         var size = pageSize;
         var offset = size * (pageId - 1);
@@ -95,25 +106,10 @@ internal sealed class PageBuffer
             : new Page(buffer);
     }
 
-    private void EvictPage()
+    private Page Access(int pageId, Page page)
     {
-        var (evictedPageId, _) = lru.Last!.Value;
-        lru.RemoveLast();
-        _ = Pages.Remove(evictedPageId);
-    }
-
-    private bool IsOverflow() => Pages.Count >= maxPages;
-
-    private void MoveToTop(int pageId, Page page)
-    {
-        _ = lru.Remove((pageId, page));
-        _ = lru.AddFirst((pageId, page));
-    }
-
-    private Page AddToTop(int pageId, Page page)
-    {
-        Pages.Add(pageId, page);
-        _ = lru.AddFirst((pageId, page));
+        pages.Add(pageId, page);
+        lru.Access(pageId, page);
         return page;
     }
 
@@ -122,10 +118,6 @@ internal sealed class PageBuffer
         await file.DisposeAsync();
         Dispose();
     }
-
-    private bool disposed;
-
-    public Dictionary<int, Page> Pages { get; }
 
     public void Dispose()
     {
