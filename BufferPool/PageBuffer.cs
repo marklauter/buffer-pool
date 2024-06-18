@@ -1,4 +1,5 @@
-﻿using System.Diagnostics.CodeAnalysis;
+﻿using System.Buffers;
+using System.Diagnostics.CodeAnalysis;
 
 namespace BufferPool;
 
@@ -6,6 +7,7 @@ internal sealed class PageBuffer
     : IAsyncDisposable
     , IDisposable
 {
+    private static readonly ArrayPool<byte> BufferPool = ArrayPool<byte>.Shared;
     private readonly ReaderWriterLockSlim gate = new();
     private readonly LruCache lru = new();
     private readonly Dictionary<int, Page> pages;
@@ -62,7 +64,7 @@ internal sealed class PageBuffer
                 Evict();
             }
 
-            return Access(pageId, Load(pageId));
+            return Access(Load(pageId));
         }
         finally
         {
@@ -74,7 +76,7 @@ internal sealed class PageBuffer
     {
         if (pages.TryGetValue(pageId, out page))
         {
-            lru.Access(pageId, page);
+            lru.Access(page);
             return true;
         }
 
@@ -83,11 +85,17 @@ internal sealed class PageBuffer
 
     private bool IfOverflow() => pages.Count >= maxPages;
 
+    [SuppressMessage("IDisposableAnalyzers.Correctness", "IDISP007:Don't dispose injected", Justification = "page isn't injected. it's owned by the page buffer.")]
     private void Evict()
     {
+        // todo: the evicted page might still be in use, so we need to do something like put it on a queue to be evicted later.
+        // ^ maybe the async Pool pattern fits this use case. For sure it is not safe to release the buffer
+        // back to the buffer pool if the page is still in use.
         if (lru.TryEvict(out var evictedPage))
         {
-            _ = pages.Remove(evictedPage.Value.pageId);
+            _ = pages.Remove(evictedPage.Id);
+            BufferPool.Return(evictedPage.buffer);
+            evictedPage.Dispose();
         }
     }
 
@@ -100,16 +108,16 @@ internal sealed class PageBuffer
             throw new InvalidOperationException($"failed to seek to {offset}");
         }
 
-        var buffer = new byte[size];
+        var buffer = BufferPool.Rent(size);
         return file.Read(buffer) != size
             ? throw new InvalidOperationException($"failed to read page {pageId}")
-            : new Page(buffer);
+            : new Page(buffer, pageId);
     }
 
-    private Page Access(int pageId, Page page)
+    private Page Access(Page page)
     {
-        pages.Add(pageId, page);
-        lru.Access(pageId, page);
+        pages.Add(page.Id, page);
+        lru.Access(page);
         return page;
     }
 

@@ -10,16 +10,15 @@ internal sealed class LruCache
 •	Access: To access an item, use the hash map to find the corresponding node in the linked list in O(1) time, then move the node to the front of the list to mark it as recently used.
 •	Eviction: To evict the least recently used item, remove the node from the end of the linked list and also remove its entry from the hash map, both operations in O(1) time.
      */
-    private readonly LinkedList<(int pageId, Page page)> accessList = new();
+    private readonly LinkedList<Page> accessList = new();
 
-    public void Access(int pageId, Page page)
+    public void Access(Page page)
     {
-        var value = (pageId, page);
-        _ = accessList.Remove(value);
-        _ = accessList.AddFirst(value);
+        _ = accessList.Remove(page);
+        _ = accessList.AddFirst(page);
     }
 
-    public bool TryEvict([NotNullWhen(true)] out (int pageId, Page page)? evictedPage)
+    public bool TryEvict([NotNullWhen(true)] out Page? evictedPage)
     {
         evictedPage = default;
         if (accessList.Count == 0)
