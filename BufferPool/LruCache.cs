@@ -2,7 +2,9 @@
 
 namespace BufferPool;
 
+// todo: consider LRU-K policy
 internal sealed class LruCache<T>
+    : IDisposable
 {
     // todo: try this idea from copilot
     /*
@@ -11,23 +13,69 @@ internal sealed class LruCache<T>
 •	Eviction: To evict the least recently used item, remove the node from the end of the linked list and also remove its entry from the hash map, both operations in O(1) time.
      */
     private readonly LinkedList<T> accessList = new();
+    private readonly ReaderWriterLockSlim latch = new();
+    private bool disposed;
 
     public void Access(T item)
     {
-        _ = accessList.Remove(item);
-        _ = accessList.AddFirst(item);
+        ThrowIfDisposed();
+
+        latch.EnterWriteLock();
+        try
+        {
+            _ = accessList.Remove(item);
+            _ = accessList.AddFirst(item);
+        }
+        finally
+        {
+            latch.ExitWriteLock();
+        }
     }
 
     public bool TryEvict([NotNullWhen(true)] out T? evictedItem)
     {
+        ThrowIfDisposed();
+
         evictedItem = default;
-        if (accessList.Count == 0)
+        latch.ExitReadLock();
+        try
         {
-            return false;
+            if (accessList.Count == 0)
+            {
+                return false;
+            }
+
+            evictedItem = accessList.Last!.Value!;
+        }
+        finally
+        {
+            latch.ExitReadLock();
         }
 
-        evictedItem = accessList.Last!.Value!;
-        accessList.RemoveLast();
+        latch.EnterWriteLock();
+        try
+        {
+            accessList.RemoveLast();
+        }
+        finally
+        {
+            latch.ExitWriteLock();
+        }
+
         return true;
     }
+
+    public void Dispose()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        latch.Dispose();
+
+        disposed = true;
+    }
+
+    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(disposed, this);
 }
