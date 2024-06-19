@@ -49,7 +49,7 @@ public sealed class PageBuffer
     {
         ThrowIfDisposed();
 
-        return latch.WaitAsync(async (cancellationToken) =>
+        return latch.CriticalSectionAsync(async (cancellationToken) =>
             TryAccess(pageId, out var pin)
                 ? pin.Page
                 : await LoadAsync(pageId, cancellationToken),
@@ -60,7 +60,7 @@ public sealed class PageBuffer
     {
         ThrowIfDisposed();
 
-        return latch.WaitAsync(() =>
+        return latch.CriticalSectionAsync(() =>
         {
             if (pages.TryGetValue(pageId, out var pin))
             {
@@ -73,7 +73,7 @@ public sealed class PageBuffer
     {
         ThrowIfDisposed();
 
-        return latch.WaitAsync(() =>
+        return latch.CriticalSectionAsync(() =>
         {
             if (pages.TryGetValue(pageId, out var pin))
             {
