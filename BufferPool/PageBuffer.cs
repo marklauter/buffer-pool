@@ -3,122 +3,156 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace BufferPool;
 
-internal sealed class PageBuffer
+public sealed class PageBuffer
     : IAsyncDisposable
     , IDisposable
 {
-    private static readonly ArrayPool<byte> BufferPool = ArrayPool<byte>.Shared;
-    private readonly ReaderWriterLockSlim gate = new();
-    private readonly LruCache lru = new();
-    private readonly Dictionary<int, Page> pages;
+    private sealed class Pin(byte[] page)
+    {
+        internal byte[] Page { get; } = page;
+        internal int References { get; private set; } = 1;
+        internal bool Dirty { get; private set; }
+
+        internal static Pin Create(byte[] page) => new(page);
+
+        internal void Lease() => ++References;
+        internal void Return() => References = References == 0 ? References : References - 1;
+        internal void MarkDirty() => Dirty = true;
+    };
+
+    private readonly Latch latch = new();
+    private readonly ArrayPool<byte> bufferPool;
+    private readonly Dictionary<int, Pin> pages;
+    private readonly LruCache<int> lru = new();
     private readonly FileStream file;
     private readonly int pageSize;
-    private readonly int maxPages;
+    private readonly int frameSize;
     private bool disposed;
 
     private PageBuffer(
         FileStream file,
         int pageSize,
-        int bufferSizeInKb)
+        int frameSize)
     {
         this.file = file;
         this.pageSize = pageSize;
-        maxPages = bufferSizeInKb * 1024 / pageSize;
-        pages = new(maxPages);
+        this.frameSize = frameSize;
+        bufferPool = ArrayPool<byte>.Create(pageSize, frameSize);
+        pages = new(frameSize);
     }
 
     [SuppressMessage("IDisposableAnalyzers.Correctness", "IDISP004:Don't ignore created IDisposable", Justification = "PageBuffer will dispose of the file.")]
     public static PageBuffer FromPath(string path, int pageSize, int bufferSizeInKb) =>
         new(File.OpenWrite(path), pageSize, bufferSizeInKb);
 
-    public Page this[int pageId] => ReadPage(pageId);
-
-    private Page ReadPage(int pageId)
+    public ValueTask<byte[]> LeaseAsync(int pageId, CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
 
-        gate.EnterReadLock();
-        try
-        {
-            if (TryAccess(pageId, out var page))
-            {
-                return page;
-            }
-        }
-        finally
-        {
-            gate.ExitReadLock();
-        }
-
-        gate.EnterWriteLock();
-        try
-        {
-            // double-checked cache pattern
-            if (TryAccess(pageId, out var page))
-            {
-                return page;
-            }
-
-            if (IfOverflow())
-            {
-                Evict();
-            }
-
-            return Access(Load(pageId));
-        }
-        finally
-        {
-            gate.ExitWriteLock();
-        }
+        return latch.WaitAsync(async (cancellationToken) =>
+            TryAccess(pageId, out var pin)
+                ? pin.Page
+                : await LoadAsync(pageId, cancellationToken),
+            cancellationToken);
     }
 
-    private bool TryAccess(int pageId, [NotNullWhen(true)] out Page? page)
+    public Task ReturnAsync(int pageId, CancellationToken cancellationToken)
     {
-        if (pages.TryGetValue(pageId, out page))
+        ThrowIfDisposed();
+
+        return latch.WaitAsync(() =>
         {
-            lru.Access(page);
+            if (pages.TryGetValue(pageId, out var pin))
+            {
+                pin.Return();
+            }
+        }, cancellationToken);
+    }
+
+    public Task MakeDirtyAsync(int pageId, CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+
+        return latch.WaitAsync(() =>
+        {
+            if (pages.TryGetValue(pageId, out var pin))
+            {
+                pin.MarkDirty();
+            }
+        }, cancellationToken);
+    }
+
+    private bool TryAccess(int pageId, [NotNullWhen(true)] out Pin? pin)
+    {
+        if (pages.TryGetValue(pageId, out pin))
+        {
+            pin.Lease();
+            lru.Access(pageId);
             return true;
         }
 
         return false;
     }
 
-    private bool IfOverflow() => pages.Count >= maxPages;
-
-    [SuppressMessage("IDisposableAnalyzers.Correctness", "IDISP007:Don't dispose injected", Justification = "page isn't injected. it's owned by the page buffer.")]
-    private void Evict()
+    private async ValueTask<byte[]> LoadAsync(int pageId, CancellationToken cancellationToken)
     {
-        // todo: the evicted page might still be in use, so we need to do something like put it on a queue to be evicted later.
-        // ^ maybe the async Pool pattern fits this use case. For sure it is not safe to release the buffer
-        // back to the buffer pool if the page is still in use.
-        if (lru.TryEvict(out var evictedPage))
+        if (IfOverflow())
         {
-            _ = pages.Remove(evictedPage.Id);
-            BufferPool.Return(evictedPage.buffer);
-            evictedPage.Dispose();
+            Evict();
         }
+
+        var page = await ReadPageAsync(pageId, cancellationToken);
+        PinPage(pageId, page);
+
+        return page;
     }
 
-    private Page Load(int pageId)
+    private bool IfOverflow() => pages.Count >= frameSize;
+
+    private void Evict()
     {
-        var size = pageSize;
-        var offset = size * (pageId - 1);
+        if (!lru.TryEvict(out var pageId))
+        {
+            return;
+        }
+
+        if (!pages.TryGetValue(pageId, out var pin))
+        {
+            return;
+        }
+
+        if (pin.References > 1)
+        {
+            pin.Return();
+            return;
+        }
+
+        _ = pages.Remove(pageId);
+        bufferPool.Return(pin.Page);
+    }
+
+    private async ValueTask<byte[]> ReadPageAsync(int pageId, CancellationToken cancellationToken)
+    {
+        Seek(pageSize * (pageId - 1));
+        var buffer = bufferPool.Rent(pageSize);
+        return await file.ReadAsync(buffer, cancellationToken) != pageSize
+            ? throw new InvalidOperationException($"failed to read page {pageId}")
+            : buffer;
+    }
+
+    public void Seek(int offset)
+    {
         if (file.Seek(offset, SeekOrigin.Begin) != offset)
         {
             throw new InvalidOperationException($"failed to seek to {offset}");
         }
-
-        var buffer = BufferPool.Rent(size);
-        return file.Read(buffer) != size
-            ? throw new InvalidOperationException($"failed to read page {pageId}")
-            : new Page(buffer, pageId);
     }
 
-    private Page Access(Page page)
+    private void PinPage(int pageId, byte[] page)
     {
-        pages.Add(page.Id, page);
-        lru.Access(page);
-        return page;
+        var pin = Pin.Create(page);
+        pages.Add(pageId, pin);
+        lru.Access(pageId);
     }
 
     public async ValueTask DisposeAsync()
@@ -134,7 +168,7 @@ internal sealed class PageBuffer
             return;
         }
 
-        gate.Dispose();
+        latch.Dispose();
 
         disposed = true;
     }

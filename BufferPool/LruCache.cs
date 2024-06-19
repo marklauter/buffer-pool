@@ -2,7 +2,7 @@
 
 namespace BufferPool;
 
-internal sealed class LruCache
+internal sealed class LruCache<T>
 {
     // todo: try this idea from copilot
     /*
@@ -10,25 +10,24 @@ internal sealed class LruCache
 •	Access: To access an item, use the hash map to find the corresponding node in the linked list in O(1) time, then move the node to the front of the list to mark it as recently used.
 •	Eviction: To evict the least recently used item, remove the node from the end of the linked list and also remove its entry from the hash map, both operations in O(1) time.
      */
-    private readonly LinkedList<Page> accessList = new();
+    private readonly LinkedList<T> accessList = new();
 
-    public void Access(Page page)
+    public void Access(T item)
     {
-        _ = accessList.Remove(page);
-        _ = accessList.AddFirst(page);
+        _ = accessList.Remove(item);
+        _ = accessList.AddFirst(item);
     }
 
-    public bool TryEvict([NotNullWhen(true)] out Page? evictedPage)
+    public bool TryEvict([NotNullWhen(true)] out T? evictedItem)
     {
-        evictedPage = default;
+        evictedItem = default;
         if (accessList.Count == 0)
         {
             return false;
         }
 
-        evictedPage = accessList.Last!.Value;
+        evictedItem = accessList.Last!.Value!;
         accessList.RemoveLast();
-
         return true;
     }
 }
