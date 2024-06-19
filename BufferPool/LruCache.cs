@@ -4,7 +4,8 @@ namespace BufferPool;
 
 // todo: consider LRU-K policy
 internal sealed class LruCache<T>
-    : IDisposable
+    : IEvictionPolicy<T>
+    , IDisposable
 {
     // todo: try this idea from copilot
     /*

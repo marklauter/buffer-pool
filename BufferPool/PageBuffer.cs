@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace BufferPool;
 
+// todo: need to kick off a background thread to write dirty pages to disk on evictions see the MS memory cache for sample
 public sealed class PageBuffer
     : IAsyncDisposable
     , IDisposable
@@ -18,24 +19,26 @@ public sealed class PageBuffer
         PreallocationSize = pageSize * frameSize
     };
 
-    private sealed class Pin(byte[] page)
+    private sealed class Pin(int pageId, byte[] page)
     {
-        internal byte[] Page { get; } = page;
+        public readonly int PageId = pageId;
+        public readonly byte[] Page = page;
         private long references = 1;
-        internal long References => Interlocked.Read(ref references);
-        internal bool Dirty { get; private set; }
+        public long References => Interlocked.Read(ref references);
+        public bool Changed;
 
-        internal static Pin Create(byte[] page) => new(page);
+        public static Pin Create(int pageId, byte[] page) => new(pageId, page);
 
-        internal void Lease() => Interlocked.Increment(ref references);
-        internal void Return() => Interlocked.Decrement(ref references);
-        internal void MarkDirty() => Dirty = true;
+        public void Lease() => Interlocked.Increment(ref references);
+        public void Return() => Interlocked.Decrement(ref references);
     };
 
     private readonly Latch latch = new();
     private readonly ArrayPool<byte> bufferPool;
+    private readonly ConcurrentQueue<Pin> dirtyPins = new();
     private readonly ConcurrentDictionary<int, Pin> pages;
-    private readonly LruCache<int> lru = new();
+    private readonly IEvictionPolicy<int> evictionPolicy;
+
     private readonly FileStream file;
     private readonly int pageSize;
     private readonly int frameSize;
@@ -44,19 +47,21 @@ public sealed class PageBuffer
     private PageBuffer(
         string path,
         int pageSize,
-        int frameSize)
+        int frameSize,
+        IEvictionPolicy<int> evictionPolicy)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path, nameof(path));
 
         this.pageSize = pageSize;
         this.frameSize = frameSize;
+        this.evictionPolicy = evictionPolicy ?? throw new ArgumentNullException(nameof(evictionPolicy));
         file = new FileStream(path, CreateFileStreamOptions(pageSize, frameSize));
         bufferPool = ArrayPool<byte>.Create(pageSize, frameSize);
         pages = new(Environment.ProcessorCount, frameSize);
     }
 
     public static PageBuffer FromPath(string path, int pageSize, int frameSize) =>
-        new(path, pageSize, frameSize);
+        new(path, pageSize, frameSize, new LruCache<int>());
 
     public ValueTask<byte[]> ReadAsync(int pageId, CancellationToken cancellationToken)
     {
@@ -90,7 +95,8 @@ public sealed class PageBuffer
 
         if (pages.TryGetValue(pageId, out var pin))
         {
-            pin.MarkDirty();
+            pin.Changed = true;
+            dirtyPins.Enqueue(pin);
         }
     }
 
@@ -99,7 +105,7 @@ public sealed class PageBuffer
         if (pages.TryGetValue(pageId, out pin))
         {
             pin.Lease();
-            lru.Access(pageId);
+            evictionPolicy.Access(pageId);
             return true;
         }
 
@@ -147,7 +153,7 @@ public sealed class PageBuffer
 
     private void Evict()
     {
-        if (!lru.TryEvict(out var pageId))
+        if (!evictionPolicy.TryEvict(out var pageId))
         {
             return;
         }
@@ -163,14 +169,32 @@ public sealed class PageBuffer
             return;
         }
 
+        if (pin.Changed)
+        {
+            return;
+        }
+
         _ = pages.TryRemove(pageId, out _);
         bufferPool.Return(pin.Page);
     }
 
     private void PinPage(int pageId, byte[] page)
     {
-        _ = pages.TryAdd(pageId, Pin.Create(page));
-        lru.Access(pageId);
+        _ = pages.TryAdd(pageId, Pin.Create(pageId, page));
+        evictionPolicy.Access(pageId);
+    }
+
+    private async ValueTask WritePageAsync(Pin pin, CancellationToken cancellationToken)
+    {
+        // todo: need to latch the specific page while writing to prevent concurrent writes
+        await latch.CriticalSectionAsync((cancellationToken) =>
+        {
+            Seek(pageSize * (pin.PageId - 1));
+            return file.WriteAsync(pin.Page, cancellationToken);
+        },
+        cancellationToken);
+
+        pin.Changed = false;
     }
 
     public async ValueTask DisposeAsync()
@@ -186,7 +210,7 @@ public sealed class PageBuffer
             return;
         }
 
-        lru.Dispose();
+        evictionPolicy.Dispose();
         latch.Dispose();
 
         disposed = true;

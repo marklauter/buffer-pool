@@ -19,6 +19,19 @@ internal sealed class Latch
         }
     }
 
+    public async ValueTask CriticalSectionAsync(Func<CancellationToken, ValueTask> func, CancellationToken cancellationToken)
+    {
+        await latch.WaitAsync(cancellationToken);
+        try
+        {
+            await func(cancellationToken);
+        }
+        finally
+        {
+            _ = latch.Release();
+        }
+    }
+
     public async ValueTask<T> CriticalSectionAsync<T>(Func<CancellationToken, ValueTask<T>> func, CancellationToken cancellationToken)
     {
         await latch.WaitAsync(cancellationToken);
