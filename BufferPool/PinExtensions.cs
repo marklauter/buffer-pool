@@ -4,9 +4,9 @@ namespace BufferPool;
 
 internal static class PinExtensions
 {
-    public static Pin Bump(this Pin pin, IReplacementPolicy<int> evictionPolicy)
+    public static async Task<Pin> BumpAsync(this Pin pin, IReplacementStrategy<int> replacementStrategy, CancellationToken cancellationToken)
     {
-        evictionPolicy.Bump(pin.PageId);
+        await replacementStrategy.BumpAsync(pin.PageId, cancellationToken);
         return pin;
     }
 }
