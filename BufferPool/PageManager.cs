@@ -30,6 +30,7 @@ public sealed class PageManager
         private readonly ReaderWriterLockSlim latch = new();
         public readonly int PageId = pageId;
         public readonly byte[] Page = page;
+
         public bool IsDirty { get; private set; }
 
         public static Pin Create(int pageId, byte[] page) => new(pageId, page);
@@ -47,11 +48,6 @@ public sealed class PageManager
 
         public Pin Clean()
         {
-            if (!ThrowIfDisposed().IsWriteLatchHeld)
-            {
-                throw new InvalidOperationException($"write latch must be held on page before calling {nameof(Clean)}");
-            }
-
             IsDirty = false;
             return this;
         }
@@ -164,7 +160,7 @@ public sealed class PageManager
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
     public async ValueTask<byte[]> LeaseAsync(int pageId, LatchType latchType, CancellationToken cancellationToken) =>
-        await ThrowIfDisposed().TryReadPinAsync(pageId, latchType, cancellationToken) is (true, var pin)
+        await ThrowIfDisposed().FlushQueueIfRequired().TryReadPinAsync(pageId, latchType, cancellationToken) is (true, var pin)
             ? pin!.Page
             : await LoadAndPinAsync(pageId, latchType, false, cancellationToken);
 
@@ -176,7 +172,7 @@ public sealed class PageManager
     /// <returns></returns>
     public bool Return(int pageId, LatchType latchType)
     {
-        if (ThrowIfDisposed().frames.TryGetValue(pageId, out var pin))
+        if (ThrowIfDisposed().FlushQueueIfRequired().frames.TryGetValue(pageId, out var pin))
         {
             // todo: what if the page is dirty and latch type is write? throw exception?
             _ = pin.Unlatch(latchType);
@@ -300,16 +296,11 @@ public sealed class PageManager
     {
         if (!isOverflow ||
             !(await replacementStrategy.TryEvictAsync(cancellationToken) is (true, var pageId)) ||
-            !frames.TryGetValue(pageId, out var pin))
+            !frames.TryGetValue(pageId, out var pin) ||
+            pin.AnyLatchHeld ||
+            pin.IsDirty && !await FlushPinAsync(pin, cancellationToken))
         {
-            // no reason to or nothing to evict 
-            return;
-        }
-
-        if (pin.AnyLatchHeld || pin.IsDirty)
-        {
-            // TryEvict removed the item from the replacement strategy, so we need to bump it
-            _ = pin?.BumpAsync(replacementStrategy, cancellationToken);
+            // no reason to evict, or nothing to evict, or can't evict
             return;
         }
 
@@ -326,6 +317,36 @@ public sealed class PageManager
             : frames.TryAdd(pageId, await Pin.Create(pageId, page).Latch(latchType).BumpAsync(replacementStrategy, cancellationToken))
                 ? page
                 : throw new Exception($"failed to add pin with page id '{pageId}'");
+
+    private long flushing;
+    private PageManager FlushQueueIfRequired()
+    {
+        if (Interlocked.Read(ref flushing) == 1 || ThrowIfDisposed().dirtyQueue.IsEmpty)
+        {
+            return this;
+        }
+
+        FlushQueue();
+
+        return this;
+
+        async void FlushQueue()
+        {
+            _ = Interlocked.Exchange(ref flushing, 1);
+            using var source = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await Task.Run(async () => await FlushDirtyItemsAsync(source.Token));
+            _ = Interlocked.Exchange(ref flushing, 0);
+        }
+    }
+
+    public async ValueTask FlushDirtyItemsAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested
+            && dirtyQueue.TryDequeue(out var pin))
+        {
+            _ = await FlushPinAsync(pin, cancellationToken);
+        }
+    }
 
     private async ValueTask<bool> FlushPinAsync(Pin pin, CancellationToken cancellationToken) =>
         pin.IsDirty &&

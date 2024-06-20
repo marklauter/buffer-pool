@@ -22,6 +22,9 @@ internal sealed class LruStrategy<T>
             _ = accessList.AddFirst(item);
         }, cancellationToken);
 
+    public async ValueTask<bool> TryEvictAsync(T item, CancellationToken cancellationToken) =>
+        await ThrowIfDisposed().alock.WithLockAsync(() => accessList.Remove(item), cancellationToken);
+
     public async ValueTask<(bool evicted, T? evictedItem)> TryEvictAsync(CancellationToken cancellationToken) =>
         await ThrowIfDisposed().alock.WithLockAsync(() =>
         {
