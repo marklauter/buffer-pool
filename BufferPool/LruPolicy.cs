@@ -3,8 +3,8 @@
 namespace BufferPool;
 
 // todo: consider LRU-K policy
-internal sealed class LruCache<T>
-    : IEvictionPolicy<T>
+internal sealed class LruPolicy<T>
+    : IReplacementPolicy<T>
     , IDisposable
 {
     // todo: try this idea from copilot
@@ -17,53 +17,53 @@ internal sealed class LruCache<T>
     private readonly ReaderWriterLockSlim latch = new();
     private bool disposed;
 
-    public void Access(T item)
-    {
-        ThrowIfDisposed();
-
-        latch.EnterWriteLock();
-        try
+    public void Bump(T item) =>
+        ThrowIfDisposed().LockedWrite(() =>
         {
             _ = accessList.Remove(item);
             _ = accessList.AddFirst(item);
-        }
-        finally
-        {
-            latch.ExitWriteLock();
-        }
-    }
+        });
 
     public bool TryEvict([NotNullWhen(true)] out T? evictedItem)
     {
-        ThrowIfDisposed();
+        evictedItem = ThrowIfDisposed().LockedRead(() =>
+            accessList.Count == 0
+                ? default
+                : accessList.Last!.Value!);
 
-        evictedItem = default;
-        latch.ExitReadLock();
+        if (evictedItem is not null)
+        {
+            LockedWrite(accessList.RemoveLast);
+            return true;
+        }
+
+        return false;
+    }
+
+    private TReturn LockedRead<TReturn>(Func<TReturn> func)
+    {
+        latch.EnterReadLock();
         try
         {
-            if (accessList.Count == 0)
-            {
-                return false;
-            }
-
-            evictedItem = accessList.Last!.Value!;
+            return func();
         }
         finally
         {
             latch.ExitReadLock();
         }
+    }
 
+    private void LockedWrite(Action action)
+    {
         latch.EnterWriteLock();
         try
         {
-            accessList.RemoveLast();
+            action();
         }
         finally
         {
             latch.ExitWriteLock();
         }
-
-        return true;
     }
 
     public void Dispose()
@@ -78,5 +78,7 @@ internal sealed class LruCache<T>
         disposed = true;
     }
 
-    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(disposed, this);
+    private LruPolicy<T> ThrowIfDisposed() => disposed
+        ? throw new ObjectDisposedException(nameof(LruPolicy<T>))
+        : this;
 }

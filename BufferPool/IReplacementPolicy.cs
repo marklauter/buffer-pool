@@ -2,9 +2,9 @@
 
 namespace BufferPool;
 
-public interface IEvictionPolicy<T>
+public interface IReplacementPolicy<T>
 {
-    void Access(T item);
+    void Bump(T item);
     void Dispose();
     bool TryEvict([NotNullWhen(true)] out T? evictedItem);
 }
