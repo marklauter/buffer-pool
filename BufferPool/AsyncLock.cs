@@ -3,46 +3,44 @@
 internal sealed class AsyncLock
     : IDisposable
 {
-    private readonly SemaphoreSlim latch = new(1, 1);
+    public async ValueTask<TReturn> WithLockAsync<TReturn>(Func<CancellationToken, ValueTask<TReturn>> func, CancellationToken cancellationToken)
+    {
+        using var scope = await LockAsync(cancellationToken);
+        return await func(cancellationToken);
+    }
+
+    public async ValueTask<TReturn> WithLockAsync<TReturn>(Func<TReturn> func, CancellationToken cancellationToken)
+    {
+        using var scope = await LockAsync(cancellationToken);
+        return func();
+    }
+
+    public async ValueTask WithLockAsync(Action action, CancellationToken cancellationToken)
+    {
+        using var scope = await LockAsync(cancellationToken);
+        action();
+    }
+
+    private readonly struct LockScope
+        : IDisposable
+    {
+        private readonly AsyncLock asyncLock;
+
+        internal LockScope(AsyncLock toRelease)
+        {
+            asyncLock = toRelease;
+        }
+
+        public void Dispose() => _ = asyncLock.latch.Release();
+    }
+
     private bool disposed;
+    private readonly SemaphoreSlim latch = new(1, 1);
 
-    public async Task EnterAsync(Action action, CancellationToken cancellationToken)
+    public async ValueTask<IDisposable> LockAsync(CancellationToken cancellationToken)
     {
         await ThrowIfDisposed().latch.WaitAsync(cancellationToken);
-        try
-        {
-            action();
-        }
-        finally
-        {
-            _ = latch.Release();
-        }
-    }
-
-    public async ValueTask EnterAsync(Func<CancellationToken, ValueTask> func, CancellationToken cancellationToken)
-    {
-        await ThrowIfDisposed().latch.WaitAsync(cancellationToken);
-        try
-        {
-            await func(cancellationToken);
-        }
-        finally
-        {
-            _ = latch.Release();
-        }
-    }
-
-    public async ValueTask<T> EnterAsync<T>(Func<CancellationToken, ValueTask<T>> func, CancellationToken cancellationToken)
-    {
-        await ThrowIfDisposed().latch.WaitAsync(cancellationToken);
-        try
-        {
-            return await func(cancellationToken);
-        }
-        finally
-        {
-            _ = latch.Release();
-        }
+        return new LockScope(this);
     }
 
     public void Dispose()
