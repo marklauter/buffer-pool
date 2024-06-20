@@ -1,6 +1,5 @@
 ﻿using System.Buffers;
 using System.Collections.Concurrent;
-using System.Diagnostics.CodeAnalysis;
 
 namespace BufferPool;
 
@@ -117,35 +116,36 @@ public sealed class PageManager
             : this;
     };
 
-    private readonly AsyncLock criticalSection = new();
+    private readonly AsyncLock alock = new();
     private readonly ArrayPool<byte> bufferPool;
     private readonly ConcurrentQueue<Pin> dirtyQueue = new();
-    private readonly ConcurrentDictionary<int, Pin> pages;
-    private readonly IReplacementPolicy<int> replacementPolicy;
+    private readonly ConcurrentDictionary<int, Pin> frames;
+    private readonly IReplacementStrategy<int> replacementStrategy;
 
     private readonly FileStream file;
     private readonly int pageSize;
-    private readonly int frameSize;
+    private readonly int frameCapacity;
     private bool disposed;
 
     private PageManager(
         string path,
         PageManagerOptions options,
-        IReplacementPolicy<int> replacementPolicy)
+        IReplacementStrategy<int> replacementStrategy)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path, nameof(path));
+        ArgumentNullException.ThrowIfNull(options);
 
         pageSize = options.PageSize;
-        frameSize = options.FrameSize;
-        this.replacementPolicy = replacementPolicy ?? throw new ArgumentNullException(nameof(replacementPolicy));
-        file = new FileStream(path, CreateFileStreamOptions(pageSize, frameSize));
-        var extraFrameSize = Convert.ToInt32(Math.Round(frameSize + frameSize * 0.25));
-        bufferPool = ArrayPool<byte>.Create(pageSize, extraFrameSize);
-        pages = new(Environment.ProcessorCount, extraFrameSize);
+        frameCapacity = options.FrameCapacity;
+        this.replacementStrategy = replacementStrategy ?? throw new ArgumentNullException(nameof(replacementStrategy));
+        file = new FileStream(path, CreateFileStreamOptions(pageSize, frameCapacity));
+        var extraFrameCapacity = Convert.ToInt32(Math.Round(frameCapacity + frameCapacity * 0.25));
+        bufferPool = ArrayPool<byte>.Create(pageSize, extraFrameCapacity);
+        frames = new(Environment.ProcessorCount, extraFrameCapacity);
     }
 
-    public static PageManager FromPath(string path, PageManagerOptions options) =>
-        new(path, options, new LruPolicy<int>());
+    public static PageManager CreateWithLruStrategy(string path, PageManagerOptions options) =>
+        new(path, options, new LruStrategy<int>());
 
     /// <summary>
     /// ReadThroughAsync bypasses the buffer pool and reads the page straight from the disk.
@@ -163,21 +163,75 @@ public sealed class PageManager
     /// <param name="latchType"></param>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    public ValueTask<byte[]> LeaseAsync(int pageId, LatchType latchType, CancellationToken cancellationToken) =>
-        ThrowIfDisposed().TryReadPin(pageId, latchType, out var pin)
-            ? ValueTask.FromResult(pin.Page)
-            : LoadAndPinAsync(pageId, latchType, false, cancellationToken);
+    public async ValueTask<byte[]> LeaseAsync(int pageId, LatchType latchType, CancellationToken cancellationToken) =>
+        await ThrowIfDisposed().TryReadPinAsync(pageId, latchType, cancellationToken) is (true, var pin)
+            ? pin!.Page
+            : await LoadAndPinAsync(pageId, latchType, false, cancellationToken);
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="pageId"></param>
     /// <param name="latchType"></param>
-    public void Return(int pageId, LatchType latchType)
+    /// <returns></returns>
+    public bool Return(int pageId, LatchType latchType)
     {
-        if (ThrowIfDisposed().pages.TryGetValue(pageId, out var pin))
+        if (ThrowIfDisposed().frames.TryGetValue(pageId, out var pin))
         {
+            // todo: what if the page is dirty and latch type is write? throw exception?
             _ = pin.Unlatch(latchType);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="pageId"></param>
+    /// <returns></returns>
+    public async Task<bool> SetDirtyAsync(int pageId, CancellationToken cancellationToken)
+    {
+        if (ThrowIfDisposed().frames.TryGetValue(pageId, out var pin))
+        {
+            dirtyQueue.Enqueue(await pin.SetDirty().BumpAsync(replacementStrategy, cancellationToken));
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
+    public async ValueTask FlushAsync(CancellationToken cancellationToken)
+    {
+        if (ThrowIfDisposed().dirtyQueue.IsEmpty)
+        {
+            return;
+        }
+
+        List<Exception>? exceptions = null;
+        var snapshot = dirtyQueue.ToArray();
+        foreach (var pin in snapshot)
+        {
+            try
+            {
+                _ = await FlushPinAsync(pin, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                exceptions ??= [];
+                exceptions.Add(ex);
+            }
+        }
+
+        if (exceptions is not null)
+        {
+            throw new AggregateException(exceptions);
         }
     }
 
@@ -185,37 +239,21 @@ public sealed class PageManager
     /// 
     /// </summary>
     /// <param name="pageId"></param>
-    public void Changed(int pageId)
-    {
-        if (ThrowIfDisposed().pages.TryGetValue(pageId, out var pin))
-        {
-            dirtyQueue.Enqueue(pin.SetDirty().Bump(replacementPolicy));
-        }
-    }
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
+    /// <exception cref="KeyNotFoundException"></exception>
+    public async ValueTask<bool> FlushAsync(int pageId, CancellationToken cancellationToken) =>
+       ThrowIfDisposed().frames.TryGetValue(pageId, out var pin) && await FlushPinAsync(pin, cancellationToken);
 
-    public async ValueTask FlushAsync(CancellationToken cancellationToken)
+    private async ValueTask<(bool success, Pin? pin)> TryReadPinAsync(int pageId, LatchType lockType, CancellationToken cancellationToken)
     {
-        var snapshot = ThrowIfDisposed().dirtyQueue.ToArray();
-        foreach (var pin in snapshot)
+        if (frames.TryGetValue(pageId, out var pin))
         {
-            await FlushPinAsync(pin, cancellationToken);
-        }
-    }
-
-    public ValueTask FlushAsync(int pageId, CancellationToken cancellationToken) =>
-       !ThrowIfDisposed().pages.TryGetValue(pageId, out var pin)
-           ? ValueTask.CompletedTask
-           : FlushPinAsync(pin, cancellationToken);
-
-    private bool TryReadPin(int pageId, LatchType lockType, [NotNullWhen(true)] out Pin? pin)
-    {
-        if (pages.TryGetValue(pageId, out pin))
-        {
-            _ = pin.Latch(lockType).Bump(replacementPolicy);
-            return true;
+            _ = await pin.Latch(lockType).BumpAsync(replacementStrategy, cancellationToken);
+            return (true, pin);
         }
 
-        return false;
+        return (false, null);
     }
 
     private async ValueTask<byte[]> LoadAndPinAsync(int pageId, LatchType latchType, bool bypassPool, CancellationToken cancellationToken)
@@ -223,32 +261,29 @@ public sealed class PageManager
         var page = await LoadAsync(pageId, cancellationToken);
         if (!bypassPool)
         {
-            EvictIfOverflow(IsOverflow);
-            return PinPage(pageId, page, latchType);
+            await EvictIfOverflowAsync(IsOverflow, cancellationToken);
+            return await PinPageAsync(pageId, page, latchType, cancellationToken);
         }
 
         return page;
     }
 
-    private ValueTask<byte[]> LoadAsync(int pageId, CancellationToken cancellationToken)
+    private async ValueTask<byte[]> LoadAsync(int pageId, CancellationToken cancellationToken)
     {
         var buffer = bufferPool.Rent(pageSize);
-        return criticalSection.EnterAsync(async (cancellationToken) =>
+        try
         {
-            try
-            {
-                Seek(pageSize * (pageId - 1));
-                return await file.ReadAsync(buffer, cancellationToken) != pageSize
-                    ? throw new InvalidOperationException($"failed to read page {pageId}")
-                    : buffer;
-            }
-            catch
-            {
-                bufferPool.Return(buffer);
-                throw;
-            }
-        },
-        cancellationToken);
+            using var scope = await alock.LockAsync(cancellationToken);
+            Seek(pageSize * (pageId - 1));
+            return await file.ReadAsync(buffer, cancellationToken) != pageSize
+                ? throw new InvalidOperationException($"failed to read page {pageId}")
+                : buffer;
+        }
+        catch
+        {
+            bufferPool.Return(buffer);
+            throw;
+        }
     }
 
     private void Seek(int offset)
@@ -259,13 +294,13 @@ public sealed class PageManager
         }
     }
 
-    private bool IsOverflow => pages.Count >= frameSize;
+    private bool IsOverflow => frames.Count >= frameCapacity;
 
-    private void EvictIfOverflow(bool isOverflow)
+    private async ValueTask EvictIfOverflowAsync(bool isOverflow, CancellationToken cancellationToken)
     {
         if (!isOverflow ||
-            !replacementPolicy.TryEvict(out var pageId) ||
-            !pages.TryGetValue(pageId, out var pin))
+            !(await replacementStrategy.TryEvictAsync(cancellationToken) is (true, var pageId)) ||
+            !frames.TryGetValue(pageId, out var pin))
         {
             // no reason to or nothing to evict 
             return;
@@ -273,37 +308,36 @@ public sealed class PageManager
 
         if (pin.AnyLatchHeld || pin.IsDirty)
         {
-            // TryEvict removed the item from the replacement policy, so we need to bump it
-            _ = pin?.Bump(replacementPolicy);
+            // TryEvict removed the item from the replacement strategy, so we need to bump it
+            _ = pin?.BumpAsync(replacementStrategy, cancellationToken);
             return;
         }
 
-        if (pages.TryRemove(pageId, out _))
+        if (frames.TryRemove(pageId, out _))
         {
             bufferPool.Return(pin.Page);
             pin.Dispose();
         }
     }
 
-    private byte[] PinPage(int pageId, byte[] page, LatchType latchType) =>
-        pages.TryAdd(pageId, Pin.Create(pageId, page).Latch(latchType).Bump(replacementPolicy))
-            ? page
-            : pages.TryGetValue(pageId, out var existingPin)
-                ? existingPin.Latch(latchType).Bump(replacementPolicy).Page
-                : throw new KeyNotFoundException($"pin not found with page id '{pageId}'");
+    private async ValueTask<byte[]> PinPageAsync(int pageId, byte[] page, LatchType latchType, CancellationToken cancellationToken) =>
+        frames.TryGetValue(pageId, out var existingPin) // check exists first to avoid allocation on Pin.Create
+            ? (await existingPin.Latch(latchType).BumpAsync(replacementStrategy, cancellationToken)).Page
+            : frames.TryAdd(pageId, await Pin.Create(pageId, page).Latch(latchType).BumpAsync(replacementStrategy, cancellationToken))
+                ? page
+                : throw new Exception($"failed to add pin with page id '{pageId}'");
 
-    private ValueTask FlushPinAsync(Pin pin, CancellationToken cancellationToken) =>
-        !pin.IsDirty
-            ? ValueTask.CompletedTask
-            : !pin.IsWriteLatchHeld
-                ? throw new InvalidOperationException($"write latch must be held on pin with page id '{pin.PageId}' before calling {nameof(FlushPinAsync)}")
-                : criticalSection.EnterAsync(async (cancellationToken) =>
-                {
-                    Seek(pageSize * (pin.PageId - 1));
-                    await file.WriteAsync(pin.Page, cancellationToken);
-                    _ = pin.Clean();
-                },
-                cancellationToken);
+    private async ValueTask<bool> FlushPinAsync(Pin pin, CancellationToken cancellationToken) =>
+        pin.IsDirty &&
+        pin.IsWriteLatchHeld &&
+        await alock.WithLockAsync(async (cancellationToken) =>
+        {
+            Seek(pageSize * (pin.PageId - 1));
+            await file.WriteAsync(pin.Page, cancellationToken);
+            _ = pin.Clean();
+            return true;
+        },
+        cancellationToken);
 
     public async ValueTask DisposeAsync()
     {
@@ -318,8 +352,8 @@ public sealed class PageManager
             return;
         }
 
-        replacementPolicy.Dispose();
-        criticalSection.Dispose();
+        replacementStrategy.Dispose();
+        alock.Dispose();
 
         disposed = true;
     }
