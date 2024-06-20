@@ -174,7 +174,6 @@ public sealed class PageManager
     {
         if (ThrowIfDisposed().FlushQueueIfRequired().frames.TryGetValue(pageId, out var pin))
         {
-            // todo: what if the page is dirty and latch type is write? throw exception?
             _ = pin.Unlatch(latchType);
             return true;
         }
