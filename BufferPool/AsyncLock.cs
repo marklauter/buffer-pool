@@ -3,24 +3,6 @@
 internal sealed class AsyncLock
     : IDisposable
 {
-    public async ValueTask<TReturn> WithLockAsync<TReturn>(Func<CancellationToken, ValueTask<TReturn>> func, CancellationToken cancellationToken)
-    {
-        using var scope = await LockAsync(cancellationToken);
-        return await func(cancellationToken);
-    }
-
-    public async ValueTask<TReturn> WithLockAsync<TReturn>(Func<TReturn> func, CancellationToken cancellationToken)
-    {
-        using var scope = await LockAsync(cancellationToken);
-        return func();
-    }
-
-    public async ValueTask WithLockAsync(Action action, CancellationToken cancellationToken)
-    {
-        using var scope = await LockAsync(cancellationToken);
-        action();
-    }
-
     private readonly struct LockScope
         : IDisposable
     {
@@ -43,6 +25,24 @@ internal sealed class AsyncLock
         return new LockScope(this);
     }
 
+    public async ValueTask<TReturn> WithLockAsync<TReturn>(Func<CancellationToken, ValueTask<TReturn>> func, CancellationToken cancellationToken)
+    {
+        using var scope = await LockAsync(cancellationToken);
+        return await func(cancellationToken);
+    }
+
+    public async ValueTask<TReturn> WithLockAsync<TReturn>(Func<TReturn> func, CancellationToken cancellationToken)
+    {
+        using var scope = await LockAsync(cancellationToken);
+        return func();
+    }
+
+    public async ValueTask WithLockAsync(Action action, CancellationToken cancellationToken)
+    {
+        using var scope = await LockAsync(cancellationToken);
+        action();
+    }
+    
     public void Dispose()
     {
         if (disposed)
