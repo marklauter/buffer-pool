@@ -1,3 +1,6 @@
+<div>
+<img src="https://github.com/marklauter/buffer-pool/blob/main/images/buffer-pool.svg" title="buffer-pool-logo" alt="buffer-pool-logo" height="128" />
+
 # buffer-pool
 A buffer pool using LRU eviction policy.
 
