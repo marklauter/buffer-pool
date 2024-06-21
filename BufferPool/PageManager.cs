@@ -268,11 +268,13 @@ public sealed class PageManager
         var buffer = bufferPool.Rent(pageSize);
         try
         {
-            using var scope = await alock.LockAsync(cancellationToken);
-            Seek(pageSize * (pageId - 1));
-            return await file.ReadAsync(buffer, cancellationToken) != pageSize
-                ? throw new InvalidOperationException($"failed to read page {pageId}")
-                : buffer;
+            return await alock.WithLockAsync(async (cancellationToken) =>
+            {
+                Seek(pageSize * (pageId - 1));
+                return await file.ReadAsync(buffer, cancellationToken) != pageSize
+                    ? throw new InvalidOperationException($"failed to read page {pageId}")
+                    : buffer;
+            }, cancellationToken);
         }
         catch
         {
