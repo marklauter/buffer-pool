@@ -7,14 +7,29 @@ public sealed class PageManager
     : IAsyncDisposable
     , IDisposable
 {
-    private static FileStreamOptions CreateFileStreamOptions(int pageSize, int frameSize) => new()
+    public static PageManager CreateWithLruStrategy(string path, PageManagerOptions options) =>
+        new(path, options, new LruStrategy<int>());
+
+    public static PageManager CreateWithLruStrategy(FileStream file, PageManagerOptions options) =>
+        new(file, options, new LruStrategy<int>());
+
+    public static FileStreamOptions DefaultFileStreamOptions => new()
     {
         Access = FileAccess.ReadWrite,
-        BufferSize = pageSize,
+        BufferSize = 0,
         Mode = FileMode.OpenOrCreate,
         Share = FileShare.Read,
         Options = FileOptions.RandomAccess | FileOptions.WriteThrough | FileOptions.Asynchronous,
-        PreallocationSize = pageSize * frameSize
+    };
+
+    private static FileStreamOptions CreateFileStreamOptions(int pageSize, int frameSize) => new()
+    {
+        Access = FileAccess.ReadWrite,
+        BufferSize = 0,
+        Mode = FileMode.OpenOrCreate,
+        Share = FileShare.Read,
+        Options = FileOptions.RandomAccess | FileOptions.WriteThrough | FileOptions.Asynchronous,
+        PreallocationSize = pageSize * frameSize,
     };
 
     public enum LatchType
@@ -140,8 +155,22 @@ public sealed class PageManager
         frames = new(Environment.ProcessorCount, extraFrameCapacity);
     }
 
-    public static PageManager CreateWithLruStrategy(string path, PageManagerOptions options) =>
-        new(path, options, new LruStrategy<int>());
+    private PageManager(
+        FileStream file,
+        PageManagerOptions options,
+        IReplacementStrategy<int> replacementStrategy)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(options);
+
+        pageSize = options.PageSize;
+        frameCapacity = options.FrameCapacity;
+        this.replacementStrategy = replacementStrategy ?? throw new ArgumentNullException(nameof(replacementStrategy));
+        this.file = file;
+        var extraFrameCapacity = Convert.ToInt32(Math.Round(frameCapacity + frameCapacity * 0.25));
+        bufferPool = ArrayPool<byte>.Create(pageSize, extraFrameCapacity);
+        frames = new(Environment.ProcessorCount, extraFrameCapacity);
+    }
 
     /// <summary>
     /// ReadThroughAsync bypasses the buffer pool and reads the page straight from the disk.
@@ -150,7 +179,7 @@ public sealed class PageManager
     /// <param name="cancellationToken"><see cref="CancellationToken"/></param>
     /// <returns><see cref="ValueTask{TResult}"/></returns>
     public ValueTask<byte[]> ReadThroughAsync(int pageId, CancellationToken cancellationToken) =>
-        ThrowIfDisposed().LoadAndPinAsync(pageId, LatchType.None, true, cancellationToken);
+        ThrowIfDisposed().LoadAsync(pageId, cancellationToken);
 
     /// <summary>
     /// 
@@ -363,6 +392,11 @@ public sealed class PageManager
 
     public async ValueTask DisposeAsync()
     {
+        if (disposed)
+        {
+            return;
+        }
+
         await file.DisposeAsync();
         Dispose();
     }
@@ -381,6 +415,6 @@ public sealed class PageManager
     }
 
     private PageManager ThrowIfDisposed() => disposed
-        ? throw new ObjectDisposedException(nameof(Pin))
+        ? throw new ObjectDisposedException(nameof(PageManager))
         : this;
 }
