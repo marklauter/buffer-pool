@@ -1,16 +1,17 @@
 ﻿namespace BufferPool;
 
+// todo: consider LRU-K strategy
+// todo: try this idea from copilot
+/*
+1.	HashMap + Double LinkedList: A common approach to optimize an LRU cache is to use a combination of a hash map and a double-linked list. The hash map stores keys and pointers to nodes in the linked list, which represents the actual order of elements based on their usage. This combination allows for constant-time O(1) access, addition, and removal operations.
+•	Access: To access an item, use the hash map to find the corresponding node in the linked list in O(1) time, then move the node to the front of the list to mark it as recently used.
+•	Eviction: To evict the least recently used item, remove the node from the end of the linked list and also remove its entry from the hash map, both operations in O(1) time.
+ */
+
 internal sealed class LruStrategy<T>
     : IReplacementStrategy<T>
     , IDisposable
 {
-    // todo: consider LRU-K strategy
-    // todo: try this idea from copilot
-    /*
-1.	HashMap + Double LinkedList: A common approach to optimize an LRU cache is to use a combination of a hash map and a double-linked list. The hash map stores keys and pointers to nodes in the linked list, which represents the actual order of elements based on their usage. This combination allows for constant-time O(1) access, addition, and removal operations.
-•	Access: To access an item, use the hash map to find the corresponding node in the linked list in O(1) time, then move the node to the front of the list to mark it as recently used.
-•	Eviction: To evict the least recently used item, remove the node from the end of the linked list and also remove its entry from the hash map, both operations in O(1) time.
-     */
     private readonly LinkedList<T> accessList = new();
     private readonly AsyncLock alock = new();
     private bool disposed;
@@ -18,6 +19,11 @@ internal sealed class LruStrategy<T>
     public ValueTask BumpAsync(T item, CancellationToken cancellationToken) =>
         ThrowIfDisposed().alock.WithLockAsync(() =>
         {
+            if (accessList.First is not null && accessList.First.Value is not null && accessList.First.Value.Equals(item))
+            {
+                return;
+            }
+
             _ = accessList.Remove(item);
             _ = accessList.AddFirst(item);
         }, cancellationToken);
