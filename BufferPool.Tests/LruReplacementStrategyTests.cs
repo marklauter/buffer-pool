@@ -139,15 +139,55 @@ public sealed class LruReplacementStrategyTests
         // Act
         for (var key = 0; key < 100; key++)
         {
-            tasks[key] = Task.Run(async () => await strategy.BumpAsync(key, CancellationToken.None));
+            tasks[key] = strategy.BumpAsync(key, CancellationToken.None).AsTask();
         }
 
         await Task.WhenAll(tasks);
 
         // Assert
+        var keys = new int[100];
+        for (var i = 0; i < 100; i++)
+        {
+            if (await strategy.TryEvictAsync(CancellationToken.None) is (true, var key))
+                keys[i] = key;
+        }
+
+        for (var i = 0; i < 100; i++)
+        {
+            Assert.True(keys.Contains(i), $"key not found: {i}");
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentEvict()
+    {
+        // Arrange
+        using var strategy = new LruReplacementStrategy<int>();
         for (var key = 0; key < 100; key++)
         {
-            Assert.True(await strategy.TryEvictAsync(key, CancellationToken.None), "evicted?");
+            await strategy.BumpAsync(key, CancellationToken.None);
+        }
+
+        // Act
+        var tasks = new Task<(bool wasEvicted, int key)>[100];
+        for (var i = 0; i < 100; i++)
+        {
+            tasks[i] =  strategy.TryEvictAsync(CancellationToken.None).AsTask();
+        }
+
+        var results = await Task.WhenAll(tasks);
+
+        // Assert
+        var evictedItems = results
+            .Where(result => result.wasEvicted)
+            .Select(result => result.key)
+            .ToArray();
+
+        Assert.Equal(100, evictedItems.Length);
+        for (var key = 0; key < 100; key++)
+        {
+            Assert.Contains(key, evictedItems);
         }
     }
 }
+
