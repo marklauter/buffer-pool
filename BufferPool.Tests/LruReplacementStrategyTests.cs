@@ -172,7 +172,7 @@ public sealed class LruReplacementStrategyTests
         var tasks = new Task<(bool wasEvicted, int key)>[100];
         for (var i = 0; i < 100; i++)
         {
-            tasks[i] =  strategy.TryEvictAsync(CancellationToken.None).AsTask();
+            tasks[i] = strategy.TryEvictAsync(CancellationToken.None).AsTask();
         }
 
         var results = await Task.WhenAll(tasks);
@@ -190,4 +190,3 @@ public sealed class LruReplacementStrategyTests
         }
     }
 }
-
