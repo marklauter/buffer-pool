@@ -111,4 +111,43 @@ public sealed class LruReplacementStrategyTests
         Assert.True(evicted);
         Assert.Equal(2, item); // Most recently used
     }
+
+    [Fact]
+    public async Task TryEvictAsync_LeastRecentlyUsedItem()
+    {
+        // Arrange
+        using var strategy = new LruReplacementStrategy<int>();
+        await strategy.BumpAsync(1, CancellationToken.None);
+        await strategy.BumpAsync(2, CancellationToken.None);
+        await strategy.BumpAsync(3, CancellationToken.None);
+
+        // Act
+        var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(evicted);
+        Assert.Equal(1, item); // Least recently used item
+    }
+
+    [Fact]
+    public async Task ConcurrentBump()
+    {
+        // Arrange
+        using var strategy = new LruReplacementStrategy<int>();
+        var tasks = new Task[100];
+
+        // Act
+        for (var key = 0; key < 100; key++)
+        {
+            tasks[key] = Task.Run(async () => await strategy.BumpAsync(key, CancellationToken.None));
+        }
+
+        await Task.WhenAll(tasks);
+
+        // Assert
+        for (var key = 0; key < 100; key++)
+        {
+            Assert.True(await strategy.TryEvictAsync(key, CancellationToken.None), "evicted?");
+        }
+    }
 }
