@@ -1,6 +1,6 @@
 ﻿namespace BufferPool;
 
-internal sealed class AsyncLock
+public sealed class AsyncLock
     : IDisposable
 {
     private bool disposed;

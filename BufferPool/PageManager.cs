@@ -7,11 +7,11 @@ public sealed class PageManager
     : IAsyncDisposable
     , IDisposable
 {
-    public static PageManager CreateWithLruStrategy(string path, PageManagerOptions options) =>
-        new(path, options, new LruStrategy<int>());
+    public static PageManager CreateWithLruReplacementStrategy(string path, PageManagerOptions options) =>
+        new(path, options, new LruReplacementStrategy<int>());
 
-    public static PageManager CreateWithLruStrategy(FileStream file, PageManagerOptions options) =>
-        new(file, options, new LruStrategy<int>());
+    public static PageManager CreateWithLruReplacementStrategy(FileStream file, PageManagerOptions options) =>
+        new(file, options, new LruReplacementStrategy<int>());
 
     public static FileStreamOptions DefaultFileStreamOptions => new()
     {

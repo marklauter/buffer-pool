@@ -8,15 +8,15 @@
 •	Eviction: To evict the least recently used item, remove the node from the end of the linked list and also remove its entry from the hash map, both operations in O(1) time.
  */
 
-internal sealed class LruStrategy<T>
-    : IReplacementStrategy<T>
+public sealed class LruReplacementStrategy<TKey>
+    : IReplacementStrategy<TKey>
     , IDisposable
 {
-    private readonly LinkedList<T> accessList = new();
+    private readonly LinkedList<TKey> accessList = new();
     private readonly AsyncLock alock = new();
     private bool disposed;
 
-    public ValueTask BumpAsync(T item, CancellationToken cancellationToken) =>
+    public ValueTask BumpAsync(TKey item, CancellationToken cancellationToken) =>
         ThrowIfDisposed().alock.WithLockAsync(() =>
         {
             if (accessList.First is not null && accessList.First.Value is not null && accessList.First.Value.Equals(item))
@@ -28,19 +28,19 @@ internal sealed class LruStrategy<T>
             _ = accessList.AddFirst(item);
         }, cancellationToken);
 
-    public async ValueTask<bool> TryEvictAsync(T item, CancellationToken cancellationToken) =>
+    public async ValueTask<bool> TryEvictAsync(TKey item, CancellationToken cancellationToken) =>
         await ThrowIfDisposed().alock.WithLockAsync(() => accessList.Remove(item), cancellationToken);
 
-    public async ValueTask<(bool evicted, T? evictedItem)> TryEvictAsync(CancellationToken cancellationToken) =>
+    public async ValueTask<(bool evicted, TKey? evictedItem)> TryEvictAsync(CancellationToken cancellationToken) =>
         await ThrowIfDisposed().alock.WithLockAsync(() =>
         {
-            if (accessList.Count > 0 && accessList.Last!.Value is T evictedItem)
+            if (accessList.Count > 0 && accessList.Last!.Value is TKey evictedItem)
             {
                 accessList.RemoveLast();
                 return (true, evictedItem);
             }
 
-            return (false, default(T));
+            return (false, default(TKey));
         }, cancellationToken);
 
     public void Dispose()
@@ -55,7 +55,7 @@ internal sealed class LruStrategy<T>
         disposed = true;
     }
 
-    private LruStrategy<T> ThrowIfDisposed() => disposed
-        ? throw new ObjectDisposedException(nameof(LruStrategy<T>))
+    private LruReplacementStrategy<TKey> ThrowIfDisposed() => disposed
+        ? throw new ObjectDisposedException(nameof(LruReplacementStrategy<TKey>))
         : this;
 }
