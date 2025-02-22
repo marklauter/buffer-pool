@@ -7,9 +7,9 @@ namespace BufferPool.Benchmarks;
 [MemoryDiagnoser]
 [Orderer(SummaryOrderPolicy.FastestToSlowest)]
 [RankColumn]
-[SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable", 
+[SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable",
     Justification = "disposable is disposed in Cleanup method")]
-public sealed class LruReplacementStrategyBenchmarks 
+public sealed class LruReplacementStrategyBenchmarks
 {
     private LruReplacementStrategy<int> strategy = default!;
     private readonly CancellationToken cancellationToken = CancellationToken.None;
@@ -30,34 +30,22 @@ public sealed class LruReplacementStrategyBenchmarks
     }
 
     [GlobalCleanup]
-    public void Cleanup()
-    {
+    public void Cleanup() =>
         strategy.Dispose();
-    }
 
     [Benchmark]
-    public async Task BumpFirstItemAsync()
-    {
-        await strategy.BumpAsync(0, cancellationToken);
-    }
+    public ValueTask BumpFirstItemAsync() =>
+        strategy.BumpAsync(0, cancellationToken);
 
     [Benchmark]
-    public async Task BumpLastItemAsync()
-    {
-        await strategy.BumpAsync(N - 1, cancellationToken);
-    }
+    public ValueTask BumpLastItemAsync() =>
+        strategy.BumpAsync(N - 1, cancellationToken);
 
     [Benchmark]
-    public async Task BumpRandomItemAsync()
-    {
-        var random = Random.Shared.Next(0, N);
-        await strategy.BumpAsync(random, cancellationToken);
-    }
+    public ValueTask BumpRandomItemAsync() =>
+        strategy.BumpAsync(Random.Shared.Next(0, N), cancellationToken);
 
     [Benchmark]
-    public async Task EvictLastItemAsync()
-    {
-        await strategy.TryEvictAsync(cancellationToken);
-    }
-
+    public async Task EvictLastItemAsync() =>
+        _ = await strategy.TryEvictAsync(cancellationToken);
 }
