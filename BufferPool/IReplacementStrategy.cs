@@ -1,9 +1,9 @@
 ﻿namespace BufferPool;
 
-public interface IReplacementStrategy<T>
+public interface IReplacementStrategy<TKey>
     : IDisposable
 {
-    ValueTask BumpAsync(T item, CancellationToken cancellationToken);
-    ValueTask<bool> TryEvictAsync(T item, CancellationToken cancellationToken);
-    ValueTask<(bool evicted, T? evictedItem)> TryEvictAsync(CancellationToken cancellationToken);
+    ValueTask BumpAsync(TKey key, CancellationToken cancellationToken);
+    ValueTask<bool> TryEvictAsync(TKey key, CancellationToken cancellationToken);
+    ValueTask<(bool wasEvicted, TKey evictedKey)> TryEvictAsync(CancellationToken cancellationToken);
 }
