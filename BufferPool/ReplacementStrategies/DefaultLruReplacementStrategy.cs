@@ -1,4 +1,6 @@
-﻿namespace BufferPool.ReplacementStrategies;
+﻿using System.Runtime.CompilerServices;
+
+namespace BufferPool.ReplacementStrategies;
 
 public sealed class DefaultLruReplacementStrategy<TKey>
     : IReplacementStrategy<TKey>
@@ -43,6 +45,7 @@ public sealed class DefaultLruReplacementStrategy<TKey>
         asyncLock.Dispose();
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private DefaultLruReplacementStrategy<TKey> ThrowIfDisposed() => disposed
         ? throw new ObjectDisposedException(nameof(DefaultLruReplacementStrategy<TKey>))
         : this;
