@@ -5,11 +5,22 @@ namespace BufferPool.Tests;
 
 public sealed class ReplacementStrategyTests
 {
-    [Fact]
-    public async Task BumpAsync_MovesItemToFront()
+    public static TheoryData<string> StrategyKeys => ["defaultLRU", "optimizedLRU"];
+
+    private static IReplacementStrategy<int> GetStrategy(string strategyKey) =>
+        strategyKey switch
+        {
+            "defaultLRU" => new DefaultLruReplacementStrategy<int>(),
+            "optimizedLRU" => new OptimizedLruReplacementStrategy<int>(),
+            _ => throw new ArgumentOutOfRangeException(strategyKey)
+        };
+
+    [Theory]
+    [MemberData(nameof(StrategyKeys))]
+    public async Task BumpAsync_MovesItemToFront(string strategyKey)
     {
         // Arrange
-        using var strategy = new DefaultLruReplacementStrategy<int>();
+        using var strategy = GetStrategy(strategyKey);
 
         // Act
         await strategy.BumpAsync(1, CancellationToken.None);
@@ -22,11 +33,12 @@ public sealed class ReplacementStrategyTests
         Assert.Equal(2, item);
     }
 
-    [Fact]
-    public async Task TryEvictAsync_EmptyStrategy_ReturnsNoEviction()
+    [Theory]
+    [MemberData(nameof(StrategyKeys))]
+    public async Task TryEvictAsync_EmptyStrategy_ReturnsNoEviction(string strategyKey)
     {
         // Arrange
-        using var strategy = new DefaultLruReplacementStrategy<int>();
+        using var strategy = GetStrategy(strategyKey);
 
         // Act
         var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
@@ -36,11 +48,12 @@ public sealed class ReplacementStrategyTests
         Assert.Equal(default, item);
     }
 
-    [Fact]
-    public async Task TryEvictAsync_WithItem_RemovesSpecificItem()
+    [Theory]
+    [MemberData(nameof(StrategyKeys))]
+    public async Task TryEvictAsync_WithItem_RemovesSpecificItem(string strategyKey)
     {
         // Arrange
-        using var strategy = new DefaultLruReplacementStrategy<int>();
+        using var strategy = GetStrategy(strategyKey);
         await strategy.BumpAsync(1, CancellationToken.None);
         await strategy.BumpAsync(2, CancellationToken.None);
 
@@ -54,13 +67,14 @@ public sealed class ReplacementStrategyTests
         Assert.Equal(2, item);
     }
 
-    [Fact]
+    [Theory]
+    [MemberData(nameof(StrategyKeys))]
     [SuppressMessage("IDisposableAnalyzers.Correctness", "IDISP017:Prefer using", Justification = "this is for testing")]
     [SuppressMessage("IDisposableAnalyzers.Correctness", "IDISP016:Don't use disposed instance", Justification = "this is for testing")]
-    public async Task Dispose_PreventsFurtherOperations()
+    public async Task Dispose_PreventsFurtherOperations(string strategyKey)
     {
         // Arrange
-        var strategy = new DefaultLruReplacementStrategy<int>();
+        using var strategy = GetStrategy(strategyKey);
         strategy.Dispose();
 
         // Act/Assert
@@ -68,11 +82,12 @@ public sealed class ReplacementStrategyTests
             async () => await strategy.BumpAsync(1, CancellationToken.None));
     }
 
-    [Fact]
-    public async Task BumpAsync_SameItemMultipleTimes_MaintainsOneInstance()
+    [Theory]
+    [MemberData(nameof(StrategyKeys))]
+    public async Task BumpAsync_SameItemMultipleTimes_MaintainsOneInstance(string strategyKey)
     {
         // Arrange
-        using var strategy = new DefaultLruReplacementStrategy<int>();
+        using var strategy = GetStrategy(strategyKey);
 
         // Act
         await strategy.BumpAsync(1, CancellationToken.None);
@@ -89,11 +104,12 @@ public sealed class ReplacementStrategyTests
         Assert.Equal(default, item);
     }
 
-    [Fact]
-    public async Task TryEvictAsync_EvictsInLruOrder()
+    [Theory]
+    [MemberData(nameof(StrategyKeys))]
+    public async Task TryEvictAsync_EvictsInLruOrder(string strategyKey)
     {
         // Arrange
-        using var strategy = new DefaultLruReplacementStrategy<int>();
+        using var strategy = GetStrategy(strategyKey);
         await strategy.BumpAsync(1, CancellationToken.None);
         await strategy.BumpAsync(2, CancellationToken.None);
         await strategy.BumpAsync(3, CancellationToken.None);
@@ -113,11 +129,12 @@ public sealed class ReplacementStrategyTests
         Assert.Equal(2, item); // Most recently used
     }
 
-    [Fact]
-    public async Task TryEvictAsync_LeastRecentlyUsedItem()
+    [Theory]
+    [MemberData(nameof(StrategyKeys))]
+    public async Task TryEvictAsync_LeastRecentlyUsedItem(string strategyKey)
     {
         // Arrange
-        using var strategy = new DefaultLruReplacementStrategy<int>();
+        using var strategy = GetStrategy(strategyKey);
         await strategy.BumpAsync(1, CancellationToken.None);
         await strategy.BumpAsync(2, CancellationToken.None);
         await strategy.BumpAsync(3, CancellationToken.None);
@@ -130,11 +147,12 @@ public sealed class ReplacementStrategyTests
         Assert.Equal(1, item); // Least recently used item
     }
 
-    [Fact]
-    public async Task ConcurrentBump()
+    [Theory]
+    [MemberData(nameof(StrategyKeys))]
+    public async Task ConcurrentBump(string strategyKey)
     {
         // Arrange
-        using var strategy = new DefaultLruReplacementStrategy<int>();
+        using var strategy = GetStrategy(strategyKey);
         var tasks = new Task[100];
 
         // Act
@@ -159,11 +177,12 @@ public sealed class ReplacementStrategyTests
         }
     }
 
-    [Fact]
-    public async Task ConcurrentEvict()
+    [Theory]
+    [MemberData(nameof(StrategyKeys))]
+    public async Task ConcurrentEvict(string strategyKey)
     {
         // Arrange
-        using var strategy = new DefaultLruReplacementStrategy<int>();
+        using var strategy = GetStrategy(strategyKey);
         for (var key = 0; key < 100; key++)
         {
             await strategy.BumpAsync(key, CancellationToken.None);
