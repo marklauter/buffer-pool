@@ -1,5 +1,6 @@
 ﻿using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Order;
+using BufferPool.ReplacementStrategies;
 using System.Diagnostics.CodeAnalysis;
 
 namespace BufferPool.Benchmarks;
@@ -9,7 +10,7 @@ namespace BufferPool.Benchmarks;
 [RankColumn]
 [SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable",
     Justification = "disposable is disposed in Cleanup method")]
-public class LruReplacementStrategyEvictionBenchmarks
+public class DefaultLruReplacementStrategyBumpBenchmarks
 {
     private DefaultLruReplacementStrategy<int> strategy = default!;
     private readonly CancellationToken cancellationToken = CancellationToken.None;
@@ -34,13 +35,14 @@ public class LruReplacementStrategyEvictionBenchmarks
         strategy.Dispose();
 
     [Benchmark]
-    public async Task EvictSpecificItemAsync() =>
-        // Evict a specific item
-        _ = await strategy.TryEvictAsync(N / 2, cancellationToken);
+    public ValueTask BumpFirstItemAsync() =>
+        strategy.BumpAsync(0, cancellationToken);
 
     [Benchmark]
-    public async Task EvictLastItemAsync() =>
-        // Evict a oldest item
-        _ = await strategy.TryEvictAsync(cancellationToken);
-}
+    public ValueTask BumpLastItemAsync() =>
+        strategy.BumpAsync(N - 1, cancellationToken);
 
+    [Benchmark]
+    public ValueTask BumpRandomItemAsync() =>
+        strategy.BumpAsync(Random.Shared.Next(0, N), cancellationToken);
+}
