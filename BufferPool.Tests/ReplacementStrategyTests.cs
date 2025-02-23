@@ -74,7 +74,7 @@ public sealed class ReplacementStrategyTests
     public async Task Dispose_PreventsFurtherOperations(string strategyKey)
     {
         // Arrange
-        using var strategy = GetStrategy(strategyKey);
+        var strategy = GetStrategy(strategyKey);
         strategy.Dispose();
 
         // Act/Assert
@@ -209,4 +209,57 @@ public sealed class ReplacementStrategyTests
             Assert.Contains(key, evictedItems);
         }
     }
+
+    [Theory]
+    [MemberData(nameof(StrategyKeys))]
+    public async Task BumpAsync_AddsNewItem(string strategyKey)
+    {
+        // Arrange
+        using var strategy = GetStrategy(strategyKey);
+
+        // Act
+        await strategy.BumpAsync(1, CancellationToken.None);
+
+        // Assert
+        var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        Assert.True(evicted);
+        Assert.Equal(1, item);
+    }
+
+    [Theory]
+    [MemberData(nameof(StrategyKeys))]
+    public async Task TryEvictAsync_EvictsMostRecentlyUsedItem(string strategyKey)
+    {
+        // Arrange
+        using var strategy = GetStrategy(strategyKey);
+        await strategy.BumpAsync(1, CancellationToken.None);
+        await strategy.BumpAsync(2, CancellationToken.None);
+        await strategy.BumpAsync(3, CancellationToken.None);
+
+        // Act
+        var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(evicted);
+        Assert.NotEqual(3, item); // Most recently used item should not be evicted
+    }
+
+    [Theory]
+    [MemberData(nameof(StrategyKeys))]
+    public async Task BumpAsync_UpdatesExistingItem(string strategyKey)
+    {
+        // Arrange
+        using var strategy = GetStrategy(strategyKey);
+        await strategy.BumpAsync(1, CancellationToken.None);
+        await strategy.BumpAsync(2, CancellationToken.None);
+
+        // Act
+        await strategy.BumpAsync(1, CancellationToken.None);
+
+        // Assert
+        var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        Assert.True(evicted);
+        Assert.Equal(2, item); // Item 1 should be at the front, so item 2 should be evicted first
+    }
 }
+
