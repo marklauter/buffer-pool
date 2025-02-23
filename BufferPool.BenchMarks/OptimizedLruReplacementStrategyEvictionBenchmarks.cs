@@ -12,7 +12,7 @@ namespace BufferPool.Benchmarks;
     Justification = "disposable is disposed in Cleanup method")]
 public class OptimizedLruReplacementStrategyEvictionBenchmarks
 {
-    private DefaultLruReplacementStrategy<int> strategy = default!;
+    private OptimizedLruReplacementStrategy<int> strategy = default!;
     private readonly CancellationToken cancellationToken = CancellationToken.None;
 
     [Params(100, 1000, 10000)]
