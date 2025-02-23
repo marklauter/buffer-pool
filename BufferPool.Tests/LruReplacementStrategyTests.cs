@@ -8,7 +8,7 @@ public sealed class LruReplacementStrategyTests
     public async Task BumpAsync_MovesItemToFront()
     {
         // Arrange
-        using var strategy = new LruReplacementStrategy<int>();
+        using var strategy = new DefaultLruReplacementStrategy<int>();
 
         // Act
         await strategy.BumpAsync(1, CancellationToken.None);
@@ -25,7 +25,7 @@ public sealed class LruReplacementStrategyTests
     public async Task TryEvictAsync_EmptyStrategy_ReturnsNoEviction()
     {
         // Arrange
-        using var strategy = new LruReplacementStrategy<int>();
+        using var strategy = new DefaultLruReplacementStrategy<int>();
 
         // Act
         var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
@@ -39,7 +39,7 @@ public sealed class LruReplacementStrategyTests
     public async Task TryEvictAsync_WithItem_RemovesSpecificItem()
     {
         // Arrange
-        using var strategy = new LruReplacementStrategy<int>();
+        using var strategy = new DefaultLruReplacementStrategy<int>();
         await strategy.BumpAsync(1, CancellationToken.None);
         await strategy.BumpAsync(2, CancellationToken.None);
 
@@ -59,7 +59,7 @@ public sealed class LruReplacementStrategyTests
     public async Task Dispose_PreventsFurtherOperations()
     {
         // Arrange
-        var strategy = new LruReplacementStrategy<int>();
+        var strategy = new DefaultLruReplacementStrategy<int>();
         strategy.Dispose();
 
         // Act/Assert
@@ -71,7 +71,7 @@ public sealed class LruReplacementStrategyTests
     public async Task BumpAsync_SameItemMultipleTimes_MaintainsOneInstance()
     {
         // Arrange
-        using var strategy = new LruReplacementStrategy<int>();
+        using var strategy = new DefaultLruReplacementStrategy<int>();
 
         // Act
         await strategy.BumpAsync(1, CancellationToken.None);
@@ -92,7 +92,7 @@ public sealed class LruReplacementStrategyTests
     public async Task TryEvictAsync_EvictsInLruOrder()
     {
         // Arrange
-        using var strategy = new LruReplacementStrategy<int>();
+        using var strategy = new DefaultLruReplacementStrategy<int>();
         await strategy.BumpAsync(1, CancellationToken.None);
         await strategy.BumpAsync(2, CancellationToken.None);
         await strategy.BumpAsync(3, CancellationToken.None);
@@ -116,7 +116,7 @@ public sealed class LruReplacementStrategyTests
     public async Task TryEvictAsync_LeastRecentlyUsedItem()
     {
         // Arrange
-        using var strategy = new LruReplacementStrategy<int>();
+        using var strategy = new DefaultLruReplacementStrategy<int>();
         await strategy.BumpAsync(1, CancellationToken.None);
         await strategy.BumpAsync(2, CancellationToken.None);
         await strategy.BumpAsync(3, CancellationToken.None);
@@ -133,7 +133,7 @@ public sealed class LruReplacementStrategyTests
     public async Task ConcurrentBump()
     {
         // Arrange
-        using var strategy = new LruReplacementStrategy<int>();
+        using var strategy = new DefaultLruReplacementStrategy<int>();
         var tasks = new Task[100];
 
         // Act
@@ -162,7 +162,7 @@ public sealed class LruReplacementStrategyTests
     public async Task ConcurrentEvict()
     {
         // Arrange
-        using var strategy = new LruReplacementStrategy<int>();
+        using var strategy = new DefaultLruReplacementStrategy<int>();
         for (var key = 0; key < 100; key++)
         {
             await strategy.BumpAsync(key, CancellationToken.None);

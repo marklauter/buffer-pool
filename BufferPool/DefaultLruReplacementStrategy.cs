@@ -8,7 +8,7 @@
 •	Eviction: To evict the least recently used key, remove the node from the end of the linked list and also remove its entry from the hash map, both operations in O(1) time.
  */
 
-public sealed class LruReplacementStrategy<TKey>
+public sealed class DefaultLruReplacementStrategy<TKey>
     : IReplacementStrategy<TKey>
     , IDisposable
 {
@@ -54,7 +54,7 @@ public sealed class LruReplacementStrategy<TKey>
         asyncLock.Dispose();
     }
 
-    private LruReplacementStrategy<TKey> ThrowIfDisposed() => disposed
-        ? throw new ObjectDisposedException(nameof(LruReplacementStrategy<TKey>))
+    private DefaultLruReplacementStrategy<TKey> ThrowIfDisposed() => disposed
+        ? throw new ObjectDisposedException(nameof(DefaultLruReplacementStrategy<TKey>))
         : this;
 }

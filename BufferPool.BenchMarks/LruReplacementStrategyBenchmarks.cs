@@ -11,7 +11,7 @@ namespace BufferPool.Benchmarks;
     Justification = "disposable is disposed in Cleanup method")]
 public sealed class LruReplacementStrategyBumpBenchmarks
 {
-    private LruReplacementStrategy<int> strategy = default!;
+    private DefaultLruReplacementStrategy<int> strategy = default!;
     private readonly CancellationToken cancellationToken = CancellationToken.None;
 
     [Params(100, 1000, 10000)]

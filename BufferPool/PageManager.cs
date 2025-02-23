@@ -8,10 +8,10 @@ public sealed class PageManager
     , IDisposable
 {
     public static PageManager CreateWithLruReplacementStrategy(string path, PageManagerOptions options) =>
-        new(path, options, new LruReplacementStrategy<int>());
+        new(path, options, new DefaultLruReplacementStrategy<int>());
 
     public static PageManager CreateWithLruReplacementStrategy(FileStream file, PageManagerOptions options) =>
-        new(file, options, new LruReplacementStrategy<int>());
+        new(file, options, new DefaultLruReplacementStrategy<int>());
 
     public static FileStreamOptions DefaultFileStreamOptions => new()
     {
