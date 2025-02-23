@@ -1,4 +1,4 @@
-﻿namespace BufferPool;
+﻿namespace BufferPool.ReplacementStrategies;
 
 // todo: consider LRU-K strategy
 // todo: try this idea from copilot
@@ -11,6 +11,7 @@
 public sealed class DefaultLruReplacementStrategy<TKey>
     : IReplacementStrategy<TKey>
     , IDisposable
+    where TKey : notnull
 {
     private readonly LinkedList<TKey> accessList = new();
     private readonly AsyncLock asyncLock = new();
@@ -20,9 +21,7 @@ public sealed class DefaultLruReplacementStrategy<TKey>
         ThrowIfDisposed().asyncLock.WithLockAsync(() =>
         {
             if (accessList.First is not null && accessList.First.Value is not null && accessList.First.Value.Equals(key))
-            {
                 return;
-            }
 
             _ = accessList.Remove(key);
             _ = accessList.AddFirst(key);
@@ -46,9 +45,7 @@ public sealed class DefaultLruReplacementStrategy<TKey>
     public void Dispose()
     {
         if (disposed)
-        {
             return;
-        }
 
         disposed = true;
         asyncLock.Dispose();

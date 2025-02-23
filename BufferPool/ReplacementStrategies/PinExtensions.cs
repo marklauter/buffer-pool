@@ -1,6 +1,6 @@
 ﻿using static BufferPool.PageManager;
 
-namespace BufferPool;
+namespace BufferPool.ReplacementStrategies;
 
 internal static class PinExtensions
 {
