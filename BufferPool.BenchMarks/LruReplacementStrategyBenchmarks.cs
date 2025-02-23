@@ -9,7 +9,7 @@ namespace BufferPool.Benchmarks;
 [RankColumn]
 [SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable",
     Justification = "disposable is disposed in Cleanup method")]
-public sealed class LruReplacementStrategyBumpBenchmarks
+public class LruReplacementStrategyBumpBenchmarks
 {
     private DefaultLruReplacementStrategy<int> strategy = default!;
     private readonly CancellationToken cancellationToken = CancellationToken.None;
