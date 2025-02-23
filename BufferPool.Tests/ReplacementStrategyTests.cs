@@ -261,5 +261,21 @@ public sealed class ReplacementStrategyTests
         Assert.True(evicted);
         Assert.Equal(2, item); // Item 1 should be at the front, so item 2 should be evicted first
     }
+
+    [Theory]
+    [MemberData(nameof(StrategyKeys))]
+    public async Task TryEvictAsync_NonExistentKey_ReturnsFalse(string strategyKey)
+    {
+        // Arrange
+        using var strategy = GetStrategy(strategyKey);
+        await strategy.BumpAsync(1, CancellationToken.None);
+        await strategy.BumpAsync(2, CancellationToken.None);
+
+        // Act
+        var removed = await strategy.TryEvictAsync(999, CancellationToken.None);
+
+        // Assert
+        Assert.False(removed);
+    }
 }
 
