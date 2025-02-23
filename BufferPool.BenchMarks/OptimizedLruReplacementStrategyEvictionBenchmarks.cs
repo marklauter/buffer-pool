@@ -6,7 +6,7 @@ using System.Diagnostics.CodeAnalysis;
 namespace BufferPool.Benchmarks;
 
 [MemoryDiagnoser]
-[Orderer(SummaryOrderPolicy.FastestToSlowest)]
+[Orderer(SummaryOrderPolicy.Method)]
 [RankColumn]
 [SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable",
     Justification = "disposable is disposed in Cleanup method")]

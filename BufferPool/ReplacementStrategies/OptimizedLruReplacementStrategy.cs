@@ -22,33 +22,28 @@ public sealed class OptimizedLruReplacementStrategy<TKey>
     private Node? tail;
     private bool disposed;
 
-    public ValueTask BumpAsync(TKey item, CancellationToken cancellationToken) =>
+    public ValueTask BumpAsync(TKey key, CancellationToken cancellationToken) =>
         ThrowIfDisposed().asyncLock.WithLockAsync(() =>
         {
-            if (accessMap.TryGetValue(item, out var node))
+            if (head != null && head.Key.Equals(key))
+                return;
+
+            if (accessMap.TryGetValue(key, out var node))
             {
                 DetachNode(node);
                 MoveToFront(node);
-            }
-            else
-            {
-                node = Node.WithKey(item);
-                accessMap.Add(item, node);
-                MoveToFront(node);
-            }
-        }, cancellationToken);
-
-    public ValueTask<bool> TryEvictAsync(TKey item, CancellationToken cancellationToken) =>
-        ThrowIfDisposed().asyncLock.WithLockAsync(() =>
-        {
-            if (accessMap.TryGetValue(item, out var node))
-            {
-                DetachNode(node);
-                return accessMap.Remove(item);
+                return;
             }
 
-            return false;
+            node = Node.WithKey(key);
+            accessMap.Add(key, node);
+            MoveToFront(node);
         }, cancellationToken);
+
+    public ValueTask<bool> TryEvictAsync(TKey key, CancellationToken cancellationToken) =>
+        ThrowIfDisposed().asyncLock.WithLockAsync(()
+            => accessMap.TryGetValue(key, out var node)
+            && RemoveNode(node), cancellationToken);
 
 #pragma warning disable CS8619 // Nullability of reference types in value doesn't match target type. Justification: It doesn't matter what the return value of the evicted key is when wasEvicted is false.
     public ValueTask<(bool wasEvicted, TKey evictedKey)> TryEvictAsync(CancellationToken cancellationToken) =>
