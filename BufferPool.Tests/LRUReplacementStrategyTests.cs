@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace BufferPool.Tests;
 
-public sealed class ReplacementStrategyTests
+public sealed class LRUReplacementStrategyTests
 {
     public static TheoryData<string> StrategyKeys => ["defaultLRU", "optimizedLRU"];
 
@@ -28,9 +28,9 @@ public sealed class ReplacementStrategyTests
         await strategy.BumpAsync(1, CancellationToken.None);
 
         // Assert
-        var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        var (evicted, key) = await strategy.TryEvictAsync(CancellationToken.None);
         Assert.True(evicted);
-        Assert.Equal(2, item);
+        Assert.Equal(2, key);
     }
 
     [Theory]
@@ -41,11 +41,11 @@ public sealed class ReplacementStrategyTests
         using var strategy = GetStrategy(strategyKey);
 
         // Act
-        var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        var (evicted, key) = await strategy.TryEvictAsync(CancellationToken.None);
 
         // Assert
         Assert.False(evicted);
-        Assert.Equal(default, item);
+        Assert.Equal(default, key);
     }
 
     [Theory]
@@ -62,9 +62,9 @@ public sealed class ReplacementStrategyTests
 
         // Assert
         Assert.True(removed);
-        var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        var (evicted, key) = await strategy.TryEvictAsync(CancellationToken.None);
         Assert.True(evicted);
-        Assert.Equal(2, item);
+        Assert.Equal(2, key);
     }
 
     [Theory]
@@ -95,13 +95,13 @@ public sealed class ReplacementStrategyTests
         await strategy.BumpAsync(1, CancellationToken.None);
 
         // Assert
-        var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        var (evicted, key) = await strategy.TryEvictAsync(CancellationToken.None);
         Assert.True(evicted);
-        Assert.Equal(1, item);
+        Assert.Equal(1, key);
 
-        (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        (evicted, key) = await strategy.TryEvictAsync(CancellationToken.None);
         Assert.False(evicted);
-        Assert.Equal(default, item);
+        Assert.Equal(default, key);
     }
 
     [Theory]
@@ -116,17 +116,17 @@ public sealed class ReplacementStrategyTests
         await strategy.BumpAsync(2, CancellationToken.None); // Move 2 to front
 
         // Act & Assert
-        var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        var (evicted, key) = await strategy.TryEvictAsync(CancellationToken.None);
         Assert.True(evicted);
-        Assert.Equal(1, item); // Least recently used
+        Assert.Equal(1, key); // Least recently used
 
-        (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        (evicted, key) = await strategy.TryEvictAsync(CancellationToken.None);
         Assert.True(evicted);
-        Assert.Equal(3, item); // Second least recently used
+        Assert.Equal(3, key); // Second least recently used
 
-        (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        (evicted, key) = await strategy.TryEvictAsync(CancellationToken.None);
         Assert.True(evicted);
-        Assert.Equal(2, item); // Most recently used
+        Assert.Equal(2, key); // Most recently used
     }
 
     [Theory]
@@ -140,11 +140,11 @@ public sealed class ReplacementStrategyTests
         await strategy.BumpAsync(3, CancellationToken.None);
 
         // Act
-        var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        var (evicted, key) = await strategy.TryEvictAsync(CancellationToken.None);
 
         // Assert
         Assert.True(evicted);
-        Assert.Equal(1, item); // Least recently used item
+        Assert.Equal(1, key); // Least recently used item
     }
 
     [Theory]
@@ -237,11 +237,11 @@ public sealed class ReplacementStrategyTests
         await strategy.BumpAsync(3, CancellationToken.None);
 
         // Act
-        var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        var (evicted, key) = await strategy.TryEvictAsync(CancellationToken.None);
 
         // Assert
         Assert.True(evicted);
-        Assert.NotEqual(3, item); // Most recently used item should not be evicted
+        Assert.NotEqual(3, key); // Most recently used item should not be evicted
     }
 
     [Theory]
@@ -257,9 +257,9 @@ public sealed class ReplacementStrategyTests
         await strategy.BumpAsync(1, CancellationToken.None);
 
         // Assert
-        var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        var (evicted, key) = await strategy.TryEvictAsync(CancellationToken.None);
         Assert.True(evicted);
-        Assert.Equal(2, item); // Item 1 should be at the front, so item 2 should be evicted first
+        Assert.Equal(2, key); // Item 1 should be at the front, so item 2 should be evicted first
     }
 
     [Theory]
