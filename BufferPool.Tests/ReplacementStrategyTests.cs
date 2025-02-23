@@ -1,8 +1,9 @@
+using BufferPool.ReplacementStrategies;
 using System.Diagnostics.CodeAnalysis;
 
 namespace BufferPool.Tests;
 
-public sealed class LruReplacementStrategyTests
+public sealed class ReplacementStrategyTests
 {
     [Fact]
     public async Task BumpAsync_MovesItemToFront()
