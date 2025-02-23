@@ -14,8 +14,7 @@ var config = DefaultConfig.Instance
 // .WithLaunchCount(1)
 // .WithToolchain(InProcessNoEmitToolchain.Instance));
 
-var bumpSummary = BenchmarkRunner.Run<DefaultLruReplacementStrategyBumpBenchmarks>(config);
-var evictionSummary = BenchmarkRunner.Run<DefaultLruReplacementStrategyEvictionBenchmarks>(config);
-
-Console.WriteLine(bumpSummary.Title);
-Console.WriteLine(evictionSummary.Title);
+_ = BenchmarkRunner.Run<DefaultLruReplacementStrategyBumpBenchmarks>(config);
+_ = BenchmarkRunner.Run<DefaultLruReplacementStrategyEvictionBenchmarks>(config);
+_ = BenchmarkRunner.Run<OptimizedLruReplacementStrategyBumpBenchmarks>(config);
+_ = BenchmarkRunner.Run<OptimizedLruReplacementStrategyEvictionBenchmarks>(config);
