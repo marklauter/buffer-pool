@@ -277,5 +277,47 @@ public sealed class LRUReplacementStrategyTests
         // Assert
         Assert.False(removed);
     }
+
+    [Theory]
+    [MemberData(nameof(StrategyKeys))]
+    public async Task BumpAsync_DoesNotMoveFrontItem(string strategyKey)
+    {
+        // Arrange
+        using var strategy = GetStrategy(strategyKey);
+        await strategy.BumpAsync(1, CancellationToken.None);
+        await strategy.BumpAsync(2, CancellationToken.None);
+
+        // Act
+        await strategy.BumpAsync(2, CancellationToken.None);
+
+        // Assert
+        var (evicted, key) = await strategy.TryEvictAsync(CancellationToken.None);
+        Assert.True(evicted);
+        Assert.Equal(1, key); // Item 2 should not move, so item 1 should be evicted first
+    }
+
+    [Theory]
+    [MemberData(nameof(StrategyKeys))]
+    public async Task TryEvictAsync_MultipleEvictions(string strategyKey)
+    {
+        // Arrange
+        using var strategy = GetStrategy(strategyKey);
+        await strategy.BumpAsync(1, CancellationToken.None);
+        await strategy.BumpAsync(2, CancellationToken.None);
+        await strategy.BumpAsync(3, CancellationToken.None);
+
+        // Act & Assert
+        var (evicted, key) = await strategy.TryEvictAsync(CancellationToken.None);
+        Assert.True(evicted);
+        Assert.Equal(1, key); // Should evict 1 first
+
+        (evicted, key) = await strategy.TryEvictAsync(CancellationToken.None);
+        Assert.True(evicted);
+        Assert.Equal(2, key); // Should evict 2 next
+
+        (evicted, key) = await strategy.TryEvictAsync(CancellationToken.None);
+        Assert.True(evicted);
+        Assert.Equal(3, key); // Should evict 3 last
+    }
 }
 
