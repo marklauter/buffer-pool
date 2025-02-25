@@ -170,4 +170,101 @@ public sealed class ClockReplacementStrategyTests
         // Assert
         Assert.False(removed);
     }
+
+    [Fact]
+    public async Task BumpAsync_UpdatesReferenceBit()
+    {
+        // Arrange
+        using var strategy = new ClockReplacementStrategy<int>();
+        await strategy.BumpAsync(1, CancellationToken.None);
+
+        // Act
+        await strategy.BumpAsync(1, CancellationToken.None);
+
+        // Assert
+        var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        Assert.True(evicted);
+        Assert.Equal(1, item); // Item 1 should not be evicted as its reference bit is set
+    }
+
+    [Fact]
+    public async Task TryEvictAsync_EvictsInClockOrder()
+    {
+        // Arrange
+        using var strategy = new ClockReplacementStrategy<int>();
+        await strategy.BumpAsync(1, CancellationToken.None);
+        await strategy.BumpAsync(2, CancellationToken.None);
+        await strategy.BumpAsync(3, CancellationToken.None);
+
+        // Act & Assert
+        var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        Assert.True(evicted);
+        Assert.Equal(1, item); // Should evict 1 first
+
+        (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        Assert.True(evicted);
+        Assert.Equal(2, item); // Should evict 2 next
+
+        (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        Assert.True(evicted);
+        Assert.Equal(3, item); // Should evict 3 last
+    }
+
+    [Fact]
+    public async Task TryEvictAsync_AllReferenceBitsSet_EvictsCurrentAndMoves()
+    {
+        // Arrange
+        using var strategy = new ClockReplacementStrategy<int>();
+        await strategy.BumpAsync(1, CancellationToken.None);
+        await strategy.BumpAsync(2, CancellationToken.None);
+        await strategy.BumpAsync(3, CancellationToken.None);
+
+        // Reference all pages again to ensure all bits are set
+        await strategy.BumpAsync(1, CancellationToken.None);
+        await strategy.BumpAsync(2, CancellationToken.None);
+        await strategy.BumpAsync(3, CancellationToken.None);
+
+        // Act
+        var evictedItems = new List<int>();
+        for (var i = 0; i < 3; i++)
+        {
+            var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+            Assert.True(evicted);
+            evictedItems.Add(item);
+        }
+
+        // Assert
+        Assert.Equal(3, evictedItems.Count);
+        Assert.Contains(1, evictedItems);
+        Assert.Contains(2, evictedItems);
+        Assert.Contains(3, evictedItems);
+
+        // Verify no more items
+        var (finalEvicted, _) = await strategy.TryEvictAsync(CancellationToken.None);
+        Assert.False(finalEvicted);
+    }
+
+    [Fact]
+    public async Task TryEvictAsync_ClearsReferenceBitsDuringScans()
+    {
+        // Arrange
+        using var strategy = new ClockReplacementStrategy<int>();
+        await strategy.BumpAsync(1, CancellationToken.None);
+        await strategy.BumpAsync(2, CancellationToken.None);
+
+        // Act - First scan should clear reference bits but not evict
+        var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+
+        // Assert - Should evict first item since its reference bit was cleared
+        Assert.True(evicted);
+
+        // Reference remaining item
+        await strategy.BumpAsync(2, CancellationToken.None);
+
+        // Should require two attempts to evict the referenced item
+        (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
+        Assert.True(evicted);
+        Assert.Equal(2, item);
+    }
 }
+
