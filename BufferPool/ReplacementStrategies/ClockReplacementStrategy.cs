@@ -34,7 +34,7 @@ public sealed class ClockReplacementStrategy<TKey> : IReplacementStrategy<TKey> 
             {
                 // Find the last node in the circular list (the one that points back to the clock hand)
                 var current = clockHand;
-                while (current.Next != clockHand)
+                while (current!.Next != clockHand)
                 {
                     current = current.Next;
                 }
@@ -58,12 +58,12 @@ public sealed class ClockReplacementStrategy<TKey> : IReplacementStrategy<TKey> 
     public ValueTask<(bool wasEvicted, TKey evictedKey)> TryEvictAsync(CancellationToken cancellationToken) =>
         ThrowIfDisposed().asyncLock.WithLockAsync(() =>
         {
-            if (clockHand == null)
+            if (clockHand is null)
                 return (false, default!);
 
             while (true)
             {
-                if (!clockHand.ReferenceBit)
+                if (!clockHand!.ReferenceBit)
                 {
                     var key = clockHand.Key;
                     RemoveNode(clockHand);
