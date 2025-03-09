@@ -2,20 +2,13 @@ namespace BufferPool.ReplacementStrategies;
 
 public sealed class ClockReplacementStrategy<TKey> : IReplacementStrategy<TKey> where TKey : notnull
 {
-    private sealed class Node
+    private sealed record Node(TKey Key)
     {
-        public TKey Key { get; }
-        public bool ReferenceBit { get; set; }
+        public bool ReferenceBit { get; set; } = true;
         public Node? Next { get; set; }
-
-        public Node(TKey key)
-        {
-            Key = key;
-            ReferenceBit = true;
-        }
     }
 
-    private readonly Dictionary<TKey, Node> nodes = new();
+    private readonly Dictionary<TKey, Node> nodes = [];
     private readonly AsyncLock asyncLock = new();
     private Node? clockHand;
     private bool disposed;
@@ -35,12 +28,20 @@ public sealed class ClockReplacementStrategy<TKey> : IReplacementStrategy<TKey> 
             if (clockHand == null)
             {
                 clockHand = node;
-                node.Next = node;
+                node.Next = node; // Self-reference for single node
             }
             else
             {
-                node.Next = clockHand.Next;
-                clockHand.Next = node;
+                // Find the last node in the circular list (the one that points back to the clock hand)
+                var current = clockHand;
+                while (current.Next != clockHand)
+                {
+                    current = current.Next;
+                }
+
+                // Insert the new node between the last node and the clock hand
+                node.Next = clockHand;
+                current.Next = node;
             }
         }, cancellationToken);
 
@@ -76,7 +77,7 @@ public sealed class ClockReplacementStrategy<TKey> : IReplacementStrategy<TKey> 
 
     private void RemoveNode(Node node)
     {
-        nodes.Remove(node.Key);
+        _ = nodes.Remove(node.Key);
 
         if (nodes.Count == 0)
         {
