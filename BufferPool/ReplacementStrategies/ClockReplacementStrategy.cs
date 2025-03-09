@@ -107,18 +107,12 @@ public sealed class ClockReplacementStrategy<TKey> : IReplacementStrategy<TKey> 
             return result;
         }
 
-        var predecessor = FindPredecessor(node)
-            ?? throw new InvalidOperationException("Predecessor not found.");
-
-        predecessor.Next = node.Next;
-
-        // Update tail if needed
+        var predecessor = Slice(node);
         if (tail == node)
         {
             tail = predecessor;
         }
 
-        // Update clock hand if needed
         if (clockHand == node)
         {
             clockHand = node.Next;
@@ -127,15 +121,35 @@ public sealed class ClockReplacementStrategy<TKey> : IReplacementStrategy<TKey> 
         return result;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private Node Slice(Node node)
+    {
+        var predecessor = FindPredecessor(node)
+            ?? throw new InvalidOperationException("Predecessor not found.");
+
+        predecessor.Next = node.Next;
+        return predecessor;
+    }
+
     private Node? FindPredecessor(Node node)
     {
-        var predecessor = clockHand;
-        while (predecessor!.Next != node && predecessor.Next is not null)
+        if (clockHand!.Next == node)
         {
-            predecessor = predecessor.Next;
+            return clockHand;
         }
 
-        return predecessor;
+        var candidate = clockHand!.Next;
+        while (candidate != clockHand)
+        {
+            if (candidate!.Next == node)
+            {
+                return candidate;
+            }
+
+            candidate = candidate.Next;
+        }
+
+        return null;
     }
 
     public void Dispose()
@@ -147,6 +161,7 @@ public sealed class ClockReplacementStrategy<TKey> : IReplacementStrategy<TKey> 
         disposed = true;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ClockReplacementStrategy<TKey> ThrowIfDisposed() => disposed
         ? throw new ObjectDisposedException(nameof(ClockReplacementStrategy<TKey>))
         : this;
