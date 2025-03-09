@@ -4,7 +4,6 @@ namespace BufferPool.ReplacementStrategies;
 
 public sealed class DefaultLruReplacementStrategy<TKey>
     : IReplacementStrategy<TKey>
-    , IDisposable
     where TKey : notnull
 {
     private readonly LinkedList<TKey> accessList = new();

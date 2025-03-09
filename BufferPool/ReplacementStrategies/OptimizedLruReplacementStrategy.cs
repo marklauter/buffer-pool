@@ -4,7 +4,6 @@ namespace BufferPool.ReplacementStrategies;
 
 public sealed class OptimizedLruReplacementStrategy<TKey>
     : IReplacementStrategy<TKey>
-    , IDisposable
     where TKey : notnull
 {
     private sealed record Node(TKey Key)
