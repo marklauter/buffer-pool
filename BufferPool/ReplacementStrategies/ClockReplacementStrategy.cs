@@ -1,15 +1,22 @@
+using System.Runtime.CompilerServices;
+
 namespace BufferPool.ReplacementStrategies;
 
 public sealed class ClockReplacementStrategy<TKey> : IReplacementStrategy<TKey> where TKey : notnull
 {
     private sealed record Node(TKey Key)
     {
-        public bool ReferenceBit { get; set; } = true;
+        public Node(TKey key, Node? next)
+            : this(key) =>
+            Next = next;
+
+        public bool IsReferenced { get; set; } = true;
         public Node? Next { get; set; }
     }
 
     private readonly Dictionary<TKey, Node> nodes = [];
     private readonly AsyncLock asyncLock = new();
+    private Node? tail;
     private Node? clockHand;
     private bool disposed;
 
@@ -18,88 +25,117 @@ public sealed class ClockReplacementStrategy<TKey> : IReplacementStrategy<TKey> 
         {
             if (nodes.TryGetValue(key, out var node))
             {
-                node.ReferenceBit = true;
+                node.IsReferenced = true;
                 return;
             }
 
-            node = new Node(key);
-            nodes.Add(key, node);
-
-            if (clockHand == null)
-            {
-                clockHand = node;
-                node.Next = node; // Self-reference for single node
-            }
-            else
-            {
-                // Find the last node in the circular list (the one that points back to the clock hand)
-                var current = clockHand;
-                while (current!.Next != clockHand)
-                {
-                    current = current.Next;
-                }
-
-                // Insert the new node between the last node and the clock hand
-                node.Next = clockHand;
-                current.Next = node;
-            }
+            InsertNode(key);
         }, cancellationToken);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void InsertNode(TKey key)
+    {
+        var isNotEmpty = NotEmpty();
+        var node = AddNode(key, CreateNode(key, isNotEmpty));
+        if (isNotEmpty)
+        {
+            tail = tail!.Next = node;
+            return;
+        }
+
+        clockHand = tail = node;
+        clockHand.Next = node;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private Node CreateNode(TKey key, bool isNotEmpty)
+        => isNotEmpty
+            ? new Node(key, clockHand)
+            : new Node(key);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private Node AddNode(TKey key, Node node)
+    {
+        nodes.Add(key, node);
+        return node;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool Empty() => clockHand is null;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool NotEmpty() => clockHand is not null;
 
     public ValueTask<bool> TryEvictAsync(TKey key, CancellationToken cancellationToken) =>
-        ThrowIfDisposed().asyncLock.WithLockAsync(() =>
-        {
-            if (!nodes.TryGetValue(key, out var node))
-                return false;
-
-            RemoveNode(node);
-            return true;
-        }, cancellationToken);
+        ThrowIfDisposed().asyncLock.WithLockAsync(()
+            => nodes.TryGetValue(key, out var node)
+            && RemoveNode(key, node), cancellationToken);
 
     public ValueTask<(bool wasEvicted, TKey evictedKey)> TryEvictAsync(CancellationToken cancellationToken) =>
         ThrowIfDisposed().asyncLock.WithLockAsync(() =>
         {
-            if (clockHand is null)
+            if (Empty())
                 return (false, default!);
 
-            while (true)
+            while (true && clockHand is not null)
             {
-                if (!clockHand!.ReferenceBit)
+                if (!clockHand.IsReferenced)
                 {
                     var key = clockHand.Key;
-                    RemoveNode(clockHand);
-                    return (true, key);
+                    return (RemoveNode(key, clockHand), key);
                 }
 
-                clockHand.ReferenceBit = false;
-                clockHand = clockHand.Next;
+                Tick();
             }
+
+            return (false, default!);
         }, cancellationToken);
 
-    private void RemoveNode(Node node)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void Tick()
     {
-        _ = nodes.Remove(node.Key);
+        clockHand!.IsReferenced = false;
+        clockHand = clockHand.Next;
+    }
 
+    private bool RemoveNode(TKey key, Node node)
+    {
+        var result = nodes.Remove(key);
         if (nodes.Count == 0)
         {
-            clockHand = null;
-            return;
+            clockHand = tail = null;
+            return result;
         }
 
-        // Find predecessor
-        var pred = clockHand;
-        while (pred!.Next != node)
+        var predecessor = FindPredecessor(node)
+            ?? throw new InvalidOperationException("Predecessor not found.");
+
+        predecessor.Next = node.Next;
+
+        // Update tail if needed
+        if (tail == node)
         {
-            pred = pred.Next;
+            tail = predecessor;
         }
-
-        // Remove node from circular list
-        pred.Next = node.Next;
 
         // Update clock hand if needed
         if (clockHand == node)
         {
             clockHand = node.Next;
         }
+
+        return result;
+    }
+
+    private Node? FindPredecessor(Node node)
+    {
+        var predecessor = clockHand;
+        while (predecessor!.Next != node && predecessor.Next is not null)
+        {
+            predecessor = predecessor.Next;
+        }
+
+        return predecessor;
     }
 
     public void Dispose()
