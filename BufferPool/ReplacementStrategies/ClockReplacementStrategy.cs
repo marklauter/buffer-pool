@@ -1,9 +1,12 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
 namespace BufferPool.ReplacementStrategies;
 
+[DebuggerDisplay("{clockHand}, {tail}")]
 public sealed class ClockReplacementStrategy<TKey> : IReplacementStrategy<TKey> where TKey : notnull
 {
+    [DebuggerDisplay("{Key} {IsReferenced} ")]
     private sealed record Node(TKey Key)
     {
         public Node(TKey key, Node? next)
@@ -77,9 +80,9 @@ public sealed class ClockReplacementStrategy<TKey> : IReplacementStrategy<TKey> 
             if (Empty())
                 return (false, default!);
 
-            while (true && clockHand is not null)
+            while (true)
             {
-                if (!clockHand.IsReferenced)
+                if (!clockHand!.IsReferenced)
                 {
                     var key = clockHand.Key;
                     return (RemoveNode(key, clockHand), key);
@@ -87,8 +90,6 @@ public sealed class ClockReplacementStrategy<TKey> : IReplacementStrategy<TKey> 
 
                 Tick();
             }
-
-            return (false, default!);
         }, cancellationToken);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
