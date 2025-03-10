@@ -341,16 +341,14 @@ public sealed class ClockReplacementStrategyTests
         await strategy.BumpAsync(2, CancellationToken.None);
         await strategy.BumpAsync(3, CancellationToken.None);
 
-        // First TryEvictAsync will clear reference bits but not evict anything
-        // This positions the clock hand at node 1 (since all reference bits are set)
         Assert.True(await strategy.TryEvictAsync(CancellationToken.None) is (true, 1));
 
-        // Act - Evict node 1, which should be where clock hand is positioned
         Assert.True(await strategy.TryEvictAsync(2, CancellationToken.None));
 
         // Add more items
         await strategy.BumpAsync(4, CancellationToken.None);
         await strategy.BumpAsync(5, CancellationToken.None);
+        await strategy.BumpAsync(3, CancellationToken.None);
 
         // Verify the list remains intact by evicting all items
         var evictedItems = new List<int>();
