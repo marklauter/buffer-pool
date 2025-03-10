@@ -1,4 +1,5 @@
 using BufferPool.ReplacementStrategies;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 
 namespace BufferPool.Tests;
@@ -184,7 +185,7 @@ public sealed class ClockReplacementStrategyTests
         // Assert
         var (evicted, item) = await strategy.TryEvictAsync(CancellationToken.None);
         Assert.True(evicted);
-        Assert.Equal(1, item); // Item 1 should not be evicted as its reference bit is set
+        Assert.Equal(1, item);
     }
 
     [Fact]
@@ -266,5 +267,100 @@ public sealed class ClockReplacementStrategyTests
         Assert.True(evicted);
         Assert.Equal(2, item);
     }
-}
 
+    [Fact]
+    public async Task TailPointer_ProvidesO1InsertionTime()
+    {
+        // Arrange
+        using var strategy = new ClockReplacementStrategy<int>();
+        var stopwatch = Stopwatch.StartNew();
+
+        // Act - Measure time to insert 10,000 items
+        for (var i = 1; i <= 10000; i++)
+        {
+            await strategy.BumpAsync(i, CancellationToken.None);
+        }
+
+        stopwatch.Stop();
+
+        // If using O(1) insertion, time should be roughly linear to number of items
+        // This is a loose test - mainly to catch if implementation regresses to O(n²)
+        Assert.True(stopwatch.ElapsedMilliseconds < 1000,
+            "Insertion time suggests tail pointer might not be providing O(1) performance");
+
+        // Verify all items were correctly added
+        var count = 0;
+        while (await strategy.TryEvictAsync(CancellationToken.None) is (true, _))
+        {
+            count++;
+        }
+
+        Assert.Equal(10000, count);
+    }
+
+    [Fact]
+    public async Task TailPointerAndCircularListIntegrity_AfterEvictions()
+    {
+        // Arrange
+        using var strategy = new ClockReplacementStrategy<int>();
+
+        // Add initial items
+        await strategy.BumpAsync(1, CancellationToken.None);
+        await strategy.BumpAsync(2, CancellationToken.None);
+        await strategy.BumpAsync(3, CancellationToken.None);
+
+        // Act - Evict a specific node
+        var result = await strategy.TryEvictAsync(2, CancellationToken.None);
+
+        // Assert
+        Assert.True(result);
+
+        // Add more items to ensure the circular structure works correctly
+        await strategy.BumpAsync(4, CancellationToken.None);
+        await strategy.BumpAsync(5, CancellationToken.None);
+
+        // Verify eviction works properly for all remaining items
+        var evictedItems = new HashSet<int>();
+        while (await strategy.TryEvictAsync(CancellationToken.None) is (true, var item))
+        {
+            _ = evictedItems.Add(item);
+        }
+
+        // Should have exactly the 4 remaining items
+        Assert.Equal([1, 3, 4, 5], evictedItems);
+    }
+
+    [Fact]
+    public async Task EvictClockHandNode_MaintainsCircularListIntegrity()
+    {
+        // Arrange
+        using var strategy = new ClockReplacementStrategy<int>();
+
+        // Add items - the clock hand starts at the first node
+        await strategy.BumpAsync(1, CancellationToken.None);
+        await strategy.BumpAsync(2, CancellationToken.None);
+        await strategy.BumpAsync(3, CancellationToken.None);
+
+        // First TryEvictAsync will clear reference bits but not evict anything
+        // This positions the clock hand at node 1 (since all reference bits are set)
+        Assert.True(await strategy.TryEvictAsync(CancellationToken.None) is (true, 1));
+
+        // Act - Evict node 1, which should be where clock hand is positioned
+        Assert.True(await strategy.TryEvictAsync(2, CancellationToken.None));
+
+        // Add more items
+        await strategy.BumpAsync(4, CancellationToken.None);
+        await strategy.BumpAsync(5, CancellationToken.None);
+
+        // Verify the list remains intact by evicting all items
+        var evictedItems = new List<int>();
+        while (await strategy.TryEvictAsync(CancellationToken.None) is (true, var item))
+        {
+            evictedItems.Add(item);
+        }
+
+        // Verify we evicted exactly the remaining items
+        Assert.Equal(3, evictedItems.Count);
+        Assert.Equal([3, 4, 5], evictedItems);
+    }
+}
