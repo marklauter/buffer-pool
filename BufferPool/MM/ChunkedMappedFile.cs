@@ -11,7 +11,7 @@ public sealed class ChunkedMappedFile
     private readonly List<MemoryMappedFile> mappings = [];
     private readonly List<MemoryMappedViewAccessor> views = [];
     private readonly int chunkSize;
-    private long fileSize;
+    private readonly long fileSize;
     private bool disposed;
     private const int MinChunkSize = 64 * 1024;
 
@@ -26,17 +26,19 @@ public sealed class ChunkedMappedFile
         int chunkSize = MinChunkSize)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath, nameof(filePath));
+        ArgumentOutOfRangeException.ThrowIfLessThan(initialSize, 0);
         ArgumentOutOfRangeException.ThrowIfLessThan(chunkSize, MinChunkSize);
 
         this.filePath = filePath;
         this.chunkSize = chunkSize;
-        initialSize = initialSize < chunkSize ? chunkSize : initialSize;
-
         fileName = Path.GetFileName(filePath);
-        fileSize = EnsureInitialFileSize(filePath, initialSize);
+        fileSize = EnsureInitialFileSize(filePath, EnsureFileSizeIsMultipleOfChunkSize(initialSize, chunkSize));
 
         CreateMappingsForSize(fileSize);
     }
+
+    private static long EnsureFileSizeIsMultipleOfChunkSize(long fileSize, int chunkSize) =>
+        (fileSize + chunkSize - 1) / chunkSize * chunkSize;
 
     private static long EnsureInitialFileSize(string filePath, long initialSize)
     {
@@ -56,7 +58,6 @@ public sealed class ChunkedMappedFile
         {
             var mapName = $"{fileName}_chunk_{chunk}";
             var offset = chunk * chunkSize;
-            var length = Math.Min(chunkSize, fileSize - offset);
 
             var file = MemoryMappedFile.CreateFromFile(
                 filePath,
@@ -67,7 +68,7 @@ public sealed class ChunkedMappedFile
 
             var view = file.CreateViewAccessor(
                 offset,
-                length,
+                chunkSize,
                 MemoryMappedFileAccess.ReadWrite);
 
             mappings.Add(file);
@@ -75,15 +76,10 @@ public sealed class ChunkedMappedFile
         }
     }
 
-    public void Grow(long newSize)
+    public void Grow()
     {
         ThrowIfDisposed();
-
-        if (newSize <= fileSize)
-            return;
-
-        fileSize = SetFileSize(filePath, newSize);
-        CreateMappingsForSize(newSize);
+        CreateMappingsForSize(SetFileSize(filePath, fileSize * 2));
     }
 
     private static long SetFileSize(string filePath, long newSize)
