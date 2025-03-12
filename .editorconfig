@@ -353,6 +353,7 @@ dotnet_diagnostic.IDE2005.severity = suggestion
 dotnet_diagnostic.IDE2006.severity = suggestion
 csharp_prefer_system_threading_lock = true:suggestion
 csharp_prefer_static_anonymous_function = true:suggestion
+csharp_style_prefer_unbound_generic_type_in_nameof = true:suggestion
 
 [*.{cs,vb}]
 dotnet_style_operator_placement_when_wrapping = beginning_of_line
