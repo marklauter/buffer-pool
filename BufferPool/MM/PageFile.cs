@@ -13,7 +13,7 @@ public sealed class PageFile
     private readonly FileStream fileStream;
 
     private readonly MemoryMappedFile memoryMap;
-    private readonly List<MemoryMappedViewAccessor> pages = [];
+    private readonly List<MemoryMappedViewAccessor> views = [];
     private bool disposed;
     private const int MinPageSize = 4 * 1024;
 
@@ -60,7 +60,7 @@ public sealed class PageFile
 
     private void CreateMappings(long fileSize)
     {
-        var currentChunks = (long)pages.Count;
+        var currentChunks = (long)views.Count;
         var neededChunks = (fileSize + pageSize - 1) / pageSize;
 
         for (var chunk = currentChunks; chunk < neededChunks; chunk++)
@@ -70,7 +70,7 @@ public sealed class PageFile
                 pageSize,
                 MemoryMappedFileAccess.ReadWrite);
 
-            pages.Add(view);
+            views.Add(view);
         }
     }
 
@@ -88,23 +88,23 @@ public sealed class PageFile
         return fileStream.Length;
     }
 
-    public unsafe PageLease LeasePage(long offset, int length)
+    public unsafe PageLease LeasePage(long offset)
     {
         ThrowIfDisposed();
         ArgumentOutOfRangeException.ThrowIfLessThan(offset, 0);
-        ArgumentOutOfRangeException.ThrowIfLessThan(length, 1);
 
-        var chunkIndex = (int)offset / pageSize;
-        var chunkOffset = (int)offset % pageSize;
+        var pageIndex = (int)offset / pageSize;
+        var pageOffset = (int)offset % pageSize;
 
-        if (chunkIndex >= pages.Count || chunkOffset + length > pageSize)
-            throw new ArgumentOutOfRangeException(nameof(offset), "Offset or length exceeds mapped region.");
+        if (pageIndex >= views.Count)
+            throw new ArgumentOutOfRangeException(nameof(offset), "Offset exceeds mapped region.");
 
         byte* ptr = null;
-        var handle = pages[chunkIndex].SafeMemoryMappedViewHandle;
+        var view = views[pageIndex];
+        var handle = view.SafeMemoryMappedViewHandle;
         handle.AcquirePointer(ref ptr);
 
-        return new PageLease(new Span<byte>(ptr + chunkOffset, length), handle);
+        return new PageLease(new Span<byte>(ptr + pageOffset, pageSize), handle, view);
     }
 
     public void Dispose()
@@ -116,12 +116,12 @@ public sealed class PageFile
 
         disposed = true;
 
-        foreach (var view in pages)
+        foreach (var view in views)
             view.Dispose();
 
         memoryMap.Dispose();
         fileStream.Dispose();
-        pages.Clear();
+        views.Clear();
     }
 
     private void ThrowIfDisposed() =>

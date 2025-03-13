@@ -1,5 +1,5 @@
 ﻿using Microsoft.Win32.SafeHandles;
-using System.Diagnostics.CodeAnalysis;
+using System.IO.MemoryMappedFiles;
 
 namespace BufferPool.MM;
 
@@ -7,19 +7,19 @@ public readonly ref struct PageLease
 {
     public PageLease(
         Span<byte> page,
-        SafeMemoryMappedViewHandle handle)
+        SafeMemoryMappedViewHandle handle,
+        MemoryMappedViewAccessor view)
     {
         Page = page;
         this.handle = handle;
+        this.view = view;
     }
 
     public readonly Span<byte> Page;
     private readonly SafeMemoryMappedViewHandle handle;
+    private readonly MemoryMappedViewAccessor view;
 
-    [SuppressMessage("IDisposableAnalyzers.Correctness", "IDISP007:Don't dispose injected", Justification = "the lease is the new owner of the handle")]
-    public void Release()
-    {
-        handle.ReleasePointer();
-        handle.Dispose();
-    }
+    public void Flush() => view.Flush();
+
+    public void Release() => handle.ReleasePointer();
 }
