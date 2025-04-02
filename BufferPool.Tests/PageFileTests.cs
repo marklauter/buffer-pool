@@ -1,4 +1,4 @@
-﻿using BufferPool.MM;
+﻿using BufferPool.MemoryMapping;
 
 namespace BufferPool.Tests;
 
