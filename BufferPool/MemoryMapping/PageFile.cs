@@ -1,6 +1,6 @@
 ﻿using System.IO.MemoryMappedFiles;
 
-namespace BufferPool.MM;
+namespace BufferPool.MemoryMapping;
 
 public sealed class PageFile
     : IDisposable
@@ -110,9 +110,7 @@ public sealed class PageFile
     public void Dispose()
     {
         if (disposed)
-        {
             return;
-        }
 
         disposed = true;
 

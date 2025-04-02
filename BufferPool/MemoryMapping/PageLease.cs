@@ -1,7 +1,7 @@
 ﻿using Microsoft.Win32.SafeHandles;
 using System.IO.MemoryMappedFiles;
 
-namespace BufferPool.MM;
+namespace BufferPool.MemoryMapping;
 
 public readonly ref struct PageLease
 {
