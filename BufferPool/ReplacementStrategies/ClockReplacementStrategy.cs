@@ -125,14 +125,12 @@ public sealed class ClockReplacementStrategy<TKey> : IReplacementStrategy<TKey> 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private Node Slice(Node node)
     {
-        var predecessor = FindPredecessor(node)
-            ?? throw new InvalidOperationException("Predecessor not found.");
-
+        var predecessor = FindPredecessor(node);
         predecessor.Next = node.Next;
         return predecessor;
     }
 
-    private Node? FindPredecessor(Node node)
+    private Node FindPredecessor(Node node)
     {
         if (clockHand!.Next == node)
         {
@@ -150,7 +148,7 @@ public sealed class ClockReplacementStrategy<TKey> : IReplacementStrategy<TKey> 
             candidate = candidate.Next;
         }
 
-        return null;
+        throw new InvalidOperationException("Predecessor not found.");
     }
 
     public void Dispose()
