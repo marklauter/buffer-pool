@@ -7,14 +7,11 @@ using BufferPool.Benchmarks;
 
 var config = DefaultConfig.Instance
     .AddJob(Job
-        .MediumRun
+        .ShortRun
         .WithPlatform(Platform.AnyCpu)
         .WithRuntime(CoreRuntime.Core80)
         .WithToolchain(InProcessEmitToolchain.Instance));
-// .WithLaunchCount(1)
-// .WithToolchain(InProcessNoEmitToolchain.Instance));
 
-_ = BenchmarkRunner.Run<DefaultLruReplacementStrategyBumpBenchmarks>(config);
-_ = BenchmarkRunner.Run<DefaultLruReplacementStrategyEvictionBenchmarks>(config);
-_ = BenchmarkRunner.Run<OptimizedLruReplacementStrategyBumpBenchmarks>(config);
-_ = BenchmarkRunner.Run<OptimizedLruReplacementStrategyEvictionBenchmarks>(config);
+_ = BenchmarkRunner.Run<LruReplacementStrategyBumpWorstCase>(config);
+//_ = BenchmarkRunner.Run<LruReplacementStrategyBumpBestCase>(config);
+//_ = BenchmarkRunner.Run<LruReplacementStrategyTryEvict>(config);
