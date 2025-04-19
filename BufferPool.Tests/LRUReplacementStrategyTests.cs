@@ -7,7 +7,7 @@ public sealed class LRUReplacementStrategyTests
 {
     public static TheoryData<string> StrategyKeys => ["defaultLRU", "optimizedLRU"];
 
-    private static IReplacementStrategy<int> GetStrategy(string strategyKey) =>
+    private static IAsyncReplacementStrategy<int> GetStrategy(string strategyKey) =>
         strategyKey switch
         {
             "defaultLRU" => new DefaultLruReplacementStrategy<int>(),
