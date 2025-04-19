@@ -11,9 +11,6 @@ public sealed class PageManager
     public static PageManager CreateWithLruReplacementStrategy(string path, PageManagerOptions options) =>
         new(path, options, new LruReplacementStrategy<int>());
 
-    public static PageManager CreateWithLruReplacementStrategy(FileStream file, PageManagerOptions options) =>
-        new(file, options, new LruReplacementStrategy<int>());
-
     public static FileStreamOptions DefaultFileStreamOptions => new()
     {
         Access = FileAccess.ReadWrite,
@@ -151,23 +148,6 @@ public sealed class PageManager
         frameCapacity = options.FrameCapacity;
         this.replacementStrategy = replacementStrategy ?? throw new ArgumentNullException(nameof(replacementStrategy));
         file = new FileStream(path, CreateFileStreamOptions(pageSize, frameCapacity));
-        var extraFrameCapacity = Convert.ToInt32(Math.Round(frameCapacity + frameCapacity * 0.25));
-        bufferPool = ArrayPool<byte>.Create(pageSize, extraFrameCapacity);
-        frames = new(Environment.ProcessorCount, extraFrameCapacity);
-    }
-
-    private PageManager(
-        FileStream file,
-        PageManagerOptions options,
-        IReplacementStrategy<int> replacementStrategy)
-    {
-        ArgumentNullException.ThrowIfNull(file);
-        ArgumentNullException.ThrowIfNull(options);
-
-        pageSize = options.PageSize;
-        frameCapacity = options.FrameCapacity;
-        this.replacementStrategy = replacementStrategy ?? throw new ArgumentNullException(nameof(replacementStrategy));
-        this.file = file;
         var extraFrameCapacity = Convert.ToInt32(Math.Round(frameCapacity + frameCapacity * 0.25));
         bufferPool = ArrayPool<byte>.Create(pageSize, extraFrameCapacity);
         frames = new(Environment.ProcessorCount, extraFrameCapacity);
@@ -390,6 +370,7 @@ public sealed class PageManager
         },
         cancellationToken);
 
+    private bool isFileDisposed;
     public async ValueTask DisposeAsync()
     {
         if (disposed)
@@ -397,7 +378,14 @@ public sealed class PageManager
             return;
         }
 
-        await file.DisposeAsync();
+        if (!isFileDisposed)
+        {
+            await file.DisposeAsync();
+            isFileDisposed = true;
+        }
+
+        await FlushDirtyItemsAsync(CancellationToken.None);
+
         Dispose();
     }
 
@@ -407,6 +395,20 @@ public sealed class PageManager
         {
             return;
         }
+
+        if (!isFileDisposed)
+        {
+            file.Dispose();
+            isFileDisposed = true;
+        }
+
+        foreach (var pin in frames.Values)
+        {
+            bufferPool.Return(pin.Page);
+            pin.Dispose();
+        }
+
+        frames.Clear();
 
         alock.Dispose();
 
