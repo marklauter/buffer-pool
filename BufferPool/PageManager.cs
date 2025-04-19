@@ -9,10 +9,10 @@ public sealed class PageManager
     , IDisposable
 {
     public static PageManager CreateWithLruReplacementStrategy(string path, PageManagerOptions options) =>
-        new(path, options, new DefaultLruReplacementStrategy<int>());
+        new(path, options, new LruReplacementStrategy<int>());
 
     public static PageManager CreateWithLruReplacementStrategy(FileStream file, PageManagerOptions options) =>
-        new(file, options, new DefaultLruReplacementStrategy<int>());
+        new(file, options, new LruReplacementStrategy<int>());
 
     public static FileStreamOptions DefaultFileStreamOptions => new()
     {
@@ -190,9 +190,9 @@ public sealed class PageManager
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
     public async ValueTask<byte[]> LeaseAsync(int pageId, LatchType latchType, CancellationToken cancellationToken) =>
-        await ThrowIfDisposed().FlushQueueIfRequired().TryReadPinAsync(pageId, latchType, cancellationToken) is (true, var pin)
+        ThrowIfDisposed().FlushQueueIfRequired().TryReadPin(pageId, latchType) is (true, var pin)
             ? pin!.Page
-            : await LoadAndPinAsync(pageId, latchType, false, cancellationToken);
+            : await PinPageAsync(pageId, latchType, false, cancellationToken);
 
     /// <summary>
     /// 
@@ -216,11 +216,11 @@ public sealed class PageManager
     /// </summary>
     /// <param name="pageId"></param>
     /// <returns></returns>
-    public async Task<bool> SetDirtyAsync(int pageId, CancellationToken cancellationToken)
+    public bool SetDirty(int pageId)
     {
         if (ThrowIfDisposed().frames.TryGetValue(pageId, out var pin))
         {
-            dirtyQueue.Enqueue(await pin.SetDirty().BumpAsync(replacementStrategy, cancellationToken));
+            dirtyQueue.Enqueue(pin.SetDirty().Touch(replacementStrategy));
             return true;
         }
 
@@ -270,24 +270,18 @@ public sealed class PageManager
     public async ValueTask<bool> FlushAsync(int pageId, CancellationToken cancellationToken) =>
        ThrowIfDisposed().frames.TryGetValue(pageId, out var pin) && await FlushPinAsync(pin, cancellationToken);
 
-    private async ValueTask<(bool success, Pin? pin)> TryReadPinAsync(int pageId, LatchType lockType, CancellationToken cancellationToken)
-    {
-        if (frames.TryGetValue(pageId, out var pin))
-        {
-            _ = await pin.Latch(lockType).BumpAsync(replacementStrategy, cancellationToken);
-            return (true, pin);
-        }
+    private (bool success, Pin? pin) TryReadPin(int pageId, LatchType lockType) =>
+        frames.TryGetValue(pageId, out var pin)
+            ? (true, pin.Latch(lockType).Touch(replacementStrategy))
+            : (false, null);
 
-        return (false, null);
-    }
-
-    private async ValueTask<byte[]> LoadAndPinAsync(int pageId, LatchType latchType, bool bypassPool, CancellationToken cancellationToken)
+    private async ValueTask<byte[]> PinPageAsync(int pageId, LatchType latchType, bool bypassPool, CancellationToken cancellationToken)
     {
         var page = await LoadAsync(pageId, cancellationToken);
         if (!bypassPool)
         {
             await EvictIfOverflowAsync(IsOverflow, cancellationToken);
-            return await PinPageAsync(pageId, page, latchType, cancellationToken);
+            return PinPage(pageId, page, latchType);
         }
 
         return page;
@@ -326,12 +320,12 @@ public sealed class PageManager
     private async ValueTask EvictIfOverflowAsync(bool isOverflow, CancellationToken cancellationToken)
     {
         if (!isOverflow ||
-            !(await replacementStrategy.TryEvictAsync(cancellationToken) is (true, var pageId)) ||
+            !(replacementStrategy.TryEvict() is (true, var pageId)) ||
             !frames.TryGetValue(pageId, out var pin) ||
             pin.AnyLatchHeld ||
             pin.IsDirty && !await FlushPinAsync(pin, cancellationToken))
         {
-            // no reason to evict, or nothing to evict, or can't evict
+            // nothing to evict, best eviction cadidate is leased, or best eviction candidate is awaiting flush
             return;
         }
 
@@ -342,17 +336,17 @@ public sealed class PageManager
         }
     }
 
-    private async ValueTask<byte[]> PinPageAsync(int pageId, byte[] page, LatchType latchType, CancellationToken cancellationToken) =>
+    private byte[] PinPage(int pageId, byte[] page, LatchType latchType) =>
         frames.TryGetValue(pageId, out var existingPin) // check exists first to avoid allocation on Pin.Create
-            ? (await existingPin.Latch(latchType).BumpAsync(replacementStrategy, cancellationToken)).Page
-            : frames.TryAdd(pageId, await Pin.Create(pageId, page).Latch(latchType).BumpAsync(replacementStrategy, cancellationToken))
+            ? existingPin.Latch(latchType).Touch(replacementStrategy).Page
+            : frames.TryAdd(pageId, Pin.Create(pageId, page).Latch(latchType).Touch(replacementStrategy))
                 ? page
                 : throw new Exception($"failed to add pin with page id '{pageId}'");
 
     private long flushing;
     private PageManager FlushQueueIfRequired()
     {
-        if (Interlocked.Read(ref flushing) == 1 || ThrowIfDisposed().dirtyQueue.IsEmpty)
+        if (ThrowIfDisposed().dirtyQueue.IsEmpty || Interlocked.CompareExchange(ref flushing, 1, 0) == 1)
         {
             return this;
         }
@@ -363,10 +357,15 @@ public sealed class PageManager
 
         async void FlushQueue()
         {
-            _ = Interlocked.Exchange(ref flushing, 1);
-            using var source = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            await Task.Run(async () => await FlushDirtyItemsAsync(source.Token));
-            _ = Interlocked.Exchange(ref flushing, 0);
+            try
+            {
+                using var source = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                await Task.Run(async () => await FlushDirtyItemsAsync(source.Token));
+            }
+            finally
+            {
+                _ = Interlocked.Exchange(ref flushing, 0);
+            }
         }
     }
 
@@ -409,7 +408,6 @@ public sealed class PageManager
             return;
         }
 
-        replacementStrategy.Dispose();
         alock.Dispose();
 
         disposed = true;

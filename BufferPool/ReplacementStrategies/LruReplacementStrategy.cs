@@ -2,8 +2,8 @@ using System.Runtime.CompilerServices;
 
 namespace BufferPool.ReplacementStrategies;
 
-public sealed class OptimizedLruReplacementStrategy<TKey>
-    : IAsyncReplacementStrategy<TKey>
+public sealed class LruReplacementStrategy<TKey>
+    : IReplacementStrategy<TKey>
     where TKey : notnull
 {
     private sealed record Node(TKey Key)
@@ -16,13 +16,13 @@ public sealed class OptimizedLruReplacementStrategy<TKey>
     }
 
     private readonly Dictionary<TKey, Node> accessMap = [];
-    private readonly AsyncLock asyncLock = new();
+    private readonly object gate = new();
     private Node? head;
     private Node? tail;
-    private bool disposed;
 
-    public ValueTask BumpAsync(TKey key, CancellationToken cancellationToken) =>
-        ThrowIfDisposed().asyncLock.WithLockAsync(() =>
+    public void Touch(TKey key)
+    {
+        lock (gate)
         {
             if (head != null && head.Key.Equals(key))
                 return;
@@ -37,23 +37,29 @@ public sealed class OptimizedLruReplacementStrategy<TKey>
             node = Node.WithKey(key);
             accessMap.Add(key, node);
             ToFirst(node);
-        }, cancellationToken);
+        }
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<bool> TryEvictAsync(TKey key, CancellationToken cancellationToken) =>
-        ThrowIfDisposed().asyncLock.WithLockAsync(()
-            => accessMap.TryGetValue(key, out var node)
-            && Remove(node), cancellationToken);
+    public bool TryEvict(TKey key)
+    {
+        lock (gate)
+        {
+            return accessMap.TryGetValue(key, out var node) && Remove(node);
+        }
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask<(bool wasEvicted, TKey evictedKey)> TryEvictAsync(CancellationToken cancellationToken) =>
-        ThrowIfDisposed().asyncLock.WithLockAsync(() =>
+    public (bool wasEvicted, TKey evictedKey) TryEvict()
+    {
+        lock (gate)
         {
             var node = tail;
             return node == null
                 ? (false, default!)
                 : (Remove(node), node.Key);
-        }, cancellationToken);
+        }
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ToFirst(Node node)
@@ -95,18 +101,5 @@ public sealed class OptimizedLruReplacementStrategy<TKey>
 
         return false;
     }
-
-    public void Dispose()
-    {
-        if (disposed)
-            return;
-
-        asyncLock.Dispose();
-        disposed = true;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private OptimizedLruReplacementStrategy<TKey> ThrowIfDisposed() => disposed
-        ? throw new ObjectDisposedException(nameof(OptimizedLruReplacementStrategy<TKey>))
-        : this;
 }
+

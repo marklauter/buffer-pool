@@ -3,7 +3,7 @@
 namespace BufferPool.ReplacementStrategies;
 
 public sealed class DefaultLruReplacementStrategy<TKey>
-    : IReplacementStrategy<TKey>
+    : IAsyncReplacementStrategy<TKey>
     where TKey : notnull
 {
     private readonly LinkedList<TKey> accessList = new();

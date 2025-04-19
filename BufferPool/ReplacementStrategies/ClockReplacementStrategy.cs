@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 namespace BufferPool.ReplacementStrategies;
 
 [DebuggerDisplay("{clockHand}, {tail}")]
-public sealed class ClockReplacementStrategy<TKey> : IReplacementStrategy<TKey> where TKey : notnull
+public sealed class ClockReplacementStrategy<TKey> : IAsyncReplacementStrategy<TKey> where TKey : notnull
 {
     [DebuggerDisplay("{Key} {IsReferenced} ")]
     private sealed record Node(TKey Key)

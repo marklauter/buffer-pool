@@ -4,9 +4,9 @@ namespace BufferPool.ReplacementStrategies;
 
 internal static class PinExtensions
 {
-    public static async Task<Pin> BumpAsync(this Pin pin, IReplacementStrategy<int> replacementStrategy, CancellationToken cancellationToken)
+    public static Pin Touch(this Pin pin, IReplacementStrategy<int> replacementStrategy)
     {
-        await replacementStrategy.BumpAsync(pin.PageId, cancellationToken);
+        replacementStrategy.Touch(pin.PageId);
         return pin;
     }
 }
