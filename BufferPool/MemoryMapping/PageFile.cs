@@ -101,10 +101,11 @@ public sealed class PageFile
 
         byte* ptr = null;
         var view = views[pageIndex];
-        var handle = view.SafeMemoryMappedViewHandle;
-        handle.AcquirePointer(ref ptr);
+        view.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
 
-        return new PageLease(new Span<byte>(ptr + pageOffset, pageSize), handle, view);
+        // todo: a different idea: https://blog.stephencleary.com/2023/09/memory-mapped-files-overlaid-structs.html
+
+        return new PageLease(new Span<byte>(ptr + pageOffset, pageSize), view);
     }
 
     public void Dispose()
