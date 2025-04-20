@@ -135,6 +135,7 @@ public sealed class PageManager
     private readonly int pageSize;
     private readonly int frameCapacity;
     private bool disposed;
+    private bool isFileDisposed;
 
     private PageManager(
         string path,
@@ -160,7 +161,7 @@ public sealed class PageManager
     /// <param name="cancellationToken"><see cref="CancellationToken"/></param>
     /// <returns><see cref="ValueTask{TResult}"/></returns>
     public ValueTask<byte[]> ReadThroughAsync(int pageId, CancellationToken cancellationToken) =>
-        ThrowIfDisposed().LoadAsync(pageId, cancellationToken);
+        ThrowIfDisposed().LoadPageAsync(ValidPageId(pageId), cancellationToken);
 
     /// <summary>
     /// 
@@ -170,7 +171,7 @@ public sealed class PageManager
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
     public async ValueTask<byte[]> LeaseAsync(int pageId, LatchType latchType, CancellationToken cancellationToken) =>
-        ThrowIfDisposed().FlushQueueIfRequired().TryReadPin(pageId, latchType) is (true, var pin)
+        ThrowIfDisposed().FlushQueueIfRequired().TryReadPin(ValidPageId(pageId), latchType) is (true, var pin)
             ? pin!.Page
             : await PinPageAsync(pageId, latchType, false, cancellationToken);
 
@@ -182,7 +183,7 @@ public sealed class PageManager
     /// <returns></returns>
     public bool Return(int pageId, LatchType latchType)
     {
-        if (ThrowIfDisposed().FlushQueueIfRequired().frames.TryGetValue(pageId, out var pin))
+        if (ThrowIfDisposed().FlushQueueIfRequired().frames.TryGetValue(ValidPageId(pageId), out var pin))
         {
             _ = pin.Unlatch(latchType);
             return true;
@@ -198,7 +199,7 @@ public sealed class PageManager
     /// <returns></returns>
     public bool SetDirty(int pageId)
     {
-        if (ThrowIfDisposed().frames.TryGetValue(pageId, out var pin))
+        if (ThrowIfDisposed().frames.TryGetValue(ValidPageId(pageId), out var pin))
         {
             dirtyQueue.Enqueue(pin.SetDirty().Touch(replacementStrategy));
             return true;
@@ -220,8 +221,7 @@ public sealed class PageManager
         }
 
         List<Exception>? exceptions = null;
-        var snapshot = dirtyQueue.ToArray();
-        foreach (var pin in snapshot)
+        while (dirtyQueue.TryDequeue(out var pin))
         {
             try
             {
@@ -248,7 +248,7 @@ public sealed class PageManager
     /// <returns></returns>
     /// <exception cref="KeyNotFoundException"></exception>
     public async ValueTask<bool> FlushAsync(int pageId, CancellationToken cancellationToken) =>
-       ThrowIfDisposed().frames.TryGetValue(pageId, out var pin) && await FlushPinAsync(pin, cancellationToken);
+       ThrowIfDisposed().frames.TryGetValue(ValidPageId(pageId), out var pin) && await FlushPinAsync(pin, cancellationToken);
 
     private (bool success, Pin? pin) TryReadPin(int pageId, LatchType lockType) =>
         frames.TryGetValue(pageId, out var pin)
@@ -257,7 +257,7 @@ public sealed class PageManager
 
     private async ValueTask<byte[]> PinPageAsync(int pageId, LatchType latchType, bool bypassPool, CancellationToken cancellationToken)
     {
-        var page = await LoadAsync(pageId, cancellationToken);
+        var page = await LoadPageAsync(pageId, cancellationToken);
         if (!bypassPool)
         {
             await EvictIfOverflowAsync(IsOverflow, cancellationToken);
@@ -267,7 +267,7 @@ public sealed class PageManager
         return page;
     }
 
-    private async ValueTask<byte[]> LoadAsync(int pageId, CancellationToken cancellationToken)
+    private async ValueTask<byte[]> LoadPageAsync(int pageId, CancellationToken cancellationToken)
     {
         var buffer = bufferPool.Rent(pageSize);
         try
@@ -370,7 +370,11 @@ public sealed class PageManager
         },
         cancellationToken);
 
-    private bool isFileDisposed;
+    private static int ValidPageId(int pageId) =>
+        pageId >= 0
+            ? pageId
+            : throw new ArgumentOutOfRangeException(nameof(pageId));
+
     public async ValueTask DisposeAsync()
     {
         if (disposed)
